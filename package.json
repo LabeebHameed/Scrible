@@ -1,0 +1,13 @@
+{
+  "name": "scrible",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Scrible — voice-first task & calendar system (monorepo)",
+  "workspaces": [
+    "backend"
+  ],
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+.expo/
+web-build/
