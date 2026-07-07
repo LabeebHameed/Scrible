@@ -10,6 +10,7 @@ import { registerSyncRoutes } from './modules/syncRoutes.js';
 import { registerAccount } from './modules/account.js';
 import { registerVoice } from './modules/voice.js';
 import { registerCalendarRoutes } from './modules/calendarRoutes.js';
+import { registerExtension } from './modules/extension.js';
 import { SyncEngine } from './modules/sync.js';
 import { buildOrchestrator } from './ai/index.js';
 import type { Orchestrator } from './ai/orchestrator.js';
@@ -112,6 +113,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   registerAccount(app, db);
   registerVoice(app, db, sync, orchestrator);
   registerCalendarRoutes(app, db, calendar, reminders);
+  registerExtension(app, db, sync);
 
   return ctx;
 }

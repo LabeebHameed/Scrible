@@ -45,7 +45,10 @@ heuristic fallback), `FLAG_*` feature flags.
   plain-language confirmations and one-tap undo (removes the external event too),
   conflict cascade (external meetings displace Scrible blocks, never silently),
   server-side reminder delivery with dedup, snooze, recurrence, quiet hours.
-- [ ] **Phase 3 — Cross-device**: Chrome extension popup reminders for computer-action tasks.
+- [x] **Phase 3 — Cross-device**: MV3 Chrome extension — event-driven check-ins on
+  browser startup / return-from-idle, one-per-session popup with complete/snooze,
+  minimal permission set, bidirectional state via the normal sync path; backend
+  routing module owns where items surface.
 - [ ] **Phase 4 — Personalization**: chat-history import → transparent, editable, deletable profile.
 - [ ] **Phase 5 — Analytics & compliance**: consent-gated event taxonomy, store compliance packages.
 - [ ] **Phase 6 — Polish**: edge-case hardening, accessibility, launch readiness.
