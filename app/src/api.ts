@@ -15,6 +15,7 @@ export interface ApiClient {
   grantConsent(category: string): Promise<void>;
   revokeConsent(category: string): Promise<void>;
   deleteAccount(): Promise<{ confirmation: string }>;
+  undoBlock(blockId: string): Promise<void>;
 }
 
 export class HttpApi implements ApiClient {
@@ -75,5 +76,8 @@ export class HttpApi implements ApiClient {
   }
   async deleteAccount() {
     return this.req<{ confirmation: string }>('DELETE', '/v1/me');
+  }
+  async undoBlock(blockId: string) {
+    await this.req('POST', `/v1/schedule/${blockId}/undo`);
   }
 }

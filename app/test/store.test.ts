@@ -53,6 +53,7 @@ function fakeApi(): ApiClient & {
     async deleteAccount() {
       return { confirmation: '' };
     },
+    async undoBlock() {},
   };
 }
 

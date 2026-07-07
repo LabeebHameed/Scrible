@@ -132,6 +132,45 @@ CREATE TABLE IF NOT EXISTS import_jobs (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  calendar_link_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  start_ts INTEGER NOT NULL,
+  end_ts INTEGER NOT NULL,
+  busy INTEGER NOT NULL DEFAULT 1,
+  foreign_event INTEGER NOT NULL DEFAULT 1,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cal_events_user ON calendar_events(user_id, start_ts);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cal_events_ext ON calendar_events(calendar_link_id, external_id);
+
+CREATE TABLE IF NOT EXISTS activity (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  message TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  item_id TEXT,
+  block_id TEXT,
+  undoable INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_user ON activity(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS push_outbox (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  dedup_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_dedup ON push_outbox(user_id, dedup_key);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -168,6 +207,9 @@ export const USER_DATA_TABLES = [
   'processed_ops',
   'changes',
   'audit_log',
+  'push_outbox',
+  'activity',
+  'calendar_events',
   'import_jobs',
   'profiles',
   'calendar_links',

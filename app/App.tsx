@@ -7,6 +7,7 @@ import { SyncStore } from './src/store';
 import { AuthScreen } from './src/screens/Auth';
 import { CaptureScreen } from './src/screens/Capture';
 import { QueueScreen } from './src/screens/Queue';
+import { ActivityScreen } from './src/screens/Activity';
 import { SettingsScreen } from './src/screens/Settings';
 import { colors } from './src/theme';
 
@@ -16,7 +17,7 @@ const API_URL =
 
 const SYNC_INTERVAL_MS = 5000;
 
-type Tab = 'capture' | 'queue' | 'settings';
+type Tab = 'capture' | 'queue' | 'activity' | 'settings';
 
 export default function App() {
   const api = useMemo(() => new HttpApi(API_URL), []);
@@ -88,6 +89,7 @@ export default function App() {
       <View style={{ flex: 1 }}>
         {tab === 'capture' ? <CaptureScreen store={store} api={api} /> : null}
         {tab === 'queue' ? <QueueScreen store={store} version={version} /> : null}
+        {tab === 'activity' ? <ActivityScreen store={store} api={api} version={version} /> : null}
         {tab === 'settings' ? (
           <SettingsScreen
             api={api}
@@ -105,6 +107,7 @@ export default function App() {
           [
             ['queue', 'Queue'],
             ['capture', 'Capture'],
+            ['activity', 'Activity'],
             ['settings', 'Settings'],
           ] as Array<[Tab, string]>
         ).map(([key, label]) => (

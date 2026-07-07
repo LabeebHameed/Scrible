@@ -62,11 +62,21 @@ export interface SyncOp {
   data?: Record<string, unknown>;
 }
 
+export interface Activity {
+  id: string;
+  message: string;
+  kind: string;
+  itemId: string | null;
+  blockId: string | null;
+  undoable: boolean;
+  createdAt: number;
+}
+
 export interface ChangeRow {
   seq: number;
   entityType: string;
   entityId: string;
   op: 'upsert' | 'delete';
-  data: Item | null;
+  data: Item | Activity | null;
   ts: number;
 }

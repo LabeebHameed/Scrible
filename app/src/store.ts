@@ -7,7 +7,7 @@
  * Pure TypeScript — storage and API are injected, so this is unit-testable in Node.
  */
 import type { ApiClient } from './api';
-import type { ChangeRow, Item, ItemSource, ItemType, SyncOp } from './types';
+import type { Activity, ChangeRow, Item, ItemSource, ItemType, SyncOp } from './types';
 
 export interface KV {
   getItem(key: string): Promise<string | null>;
@@ -29,6 +29,7 @@ const newId = (): string =>
 
 export class SyncStore {
   items: Record<string, Item> = {};
+  activities: Activity[] = [];
   pendingOps: SyncOp[] = [];
   cursor = 0;
   syncing = false;
@@ -53,8 +54,9 @@ export class SyncStore {
     const raw = await this.kv.getItem(this.storageKey);
     if (raw) {
       try {
-        const s = JSON.parse(raw) as PersistedState;
+        const s = JSON.parse(raw) as PersistedState & { activities?: Activity[] };
         this.items = s.items ?? {};
+        this.activities = s.activities ?? [];
         this.pendingOps = s.pendingOps ?? [];
         this.cursor = s.cursor ?? 0;
       } catch {
@@ -67,7 +69,12 @@ export class SyncStore {
   private async persist(): Promise<void> {
     await this.kv.setItem(
       this.storageKey,
-      JSON.stringify({ items: this.items, pendingOps: this.pendingOps, cursor: this.cursor }),
+      JSON.stringify({
+        items: this.items,
+        activities: this.activities,
+        pendingOps: this.pendingOps,
+        cursor: this.cursor,
+      }),
     );
   }
 
@@ -162,11 +169,17 @@ export class SyncStore {
   }
 
   applyChange(change: ChangeRow): void {
-    if (change.entityType !== 'item') return;
-    if (change.op === 'delete') {
-      delete this.items[change.entityId];
-    } else if (change.data) {
-      this.items[change.entityId] = change.data;
+    if (change.entityType === 'item') {
+      if (change.op === 'delete') {
+        delete this.items[change.entityId];
+      } else if (change.data) {
+        this.items[change.entityId] = change.data as Item;
+      }
+    } else if (change.entityType === 'activity' && change.data) {
+      const activity = change.data as Activity;
+      if (!this.activities.some((a) => a.id === activity.id)) {
+        this.activities = [activity, ...this.activities].slice(0, 100);
+      }
     }
     this.cursor = Math.max(this.cursor, change.seq);
   }

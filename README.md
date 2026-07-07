@@ -40,7 +40,11 @@ heuristic fallback), `FLAG_*` feature flags.
   classification & decomposition (Claude provider + deterministic heuristic fallback) →
   "right now" queue → one-tap completion and spoken "done"; fully offline-capable
   client with a durable op queue.
-- [ ] **Phase 2 — Calendar intelligence**: two-way calendar sync, availability, auto-scheduling, reminders.
+- [x] **Phase 2 — Calendar intelligence**: provider-abstracted two-way sync (Google/
+  Outlook adapters + internal calendar), availability model, auto-scheduling with
+  plain-language confirmations and one-tap undo (removes the external event too),
+  conflict cascade (external meetings displace Scrible blocks, never silently),
+  server-side reminder delivery with dedup, snooze, recurrence, quiet hours.
 - [ ] **Phase 3 — Cross-device**: Chrome extension popup reminders for computer-action tasks.
 - [ ] **Phase 4 — Personalization**: chat-history import → transparent, editable, deletable profile.
 - [ ] **Phase 5 — Analytics & compliance**: consent-gated event taxonomy, store compliance packages.
