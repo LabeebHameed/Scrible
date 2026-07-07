@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppContext } from './server.js';
 import type { ItemType } from './types.js';
+import { loadEffectiveProfile } from './modules/profile.js';
 
 export function enableEnrichment(ctx: AppContext): void {
   if (!ctx.config.flags.autoClassify) return;
@@ -86,10 +87,7 @@ export function enableEnrichment(ctx: AppContext): void {
 
 function loadProfile(ctx: AppContext, userId: string) {
   if (!ctx.config.flags.personalization) return null;
-  const row = ctx.db.prepare('SELECT attributes FROM profiles WHERE user_id = ?').get(userId) as
-    | { attributes: string }
-    | undefined;
-  return row ? JSON.parse(row.attributes) : null;
+  return loadEffectiveProfile(ctx.db, userId);
 }
 
 declare module './server.js' {

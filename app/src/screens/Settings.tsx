@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import type { ApiClient } from '../api';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import type { ApiClient, ProfileView } from '../api';
 import type { SyncStore } from '../store';
 import { colors } from '../theme';
 
@@ -20,10 +20,15 @@ export function SettingsScreen(props: {
 }) {
   const [consents, setConsents] = useState<Record<string, { granted: boolean }>>({});
   const [error, setError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileView | null>(null);
+  const [importText, setImportText] = useState('');
+  const [importSource, setImportSource] = useState<'claude' | 'chatgpt' | 'gemini' | 'generic'>('claude');
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
       setConsents(await props.api.getConsents());
+      setProfile(await props.api.getProfile());
       setError(null);
     } catch (err) {
       setError('Offline — consent settings need a connection.');
@@ -32,6 +37,46 @@ export function SettingsScreen(props: {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const runImport = async () => {
+    setImportStatus('Processing… your export is parsed in memory and never stored.');
+    try {
+      await props.api.importChats(importSource, importText);
+      setImportText('');
+      setImportStatus('Done — profile updated below. The raw export was discarded.');
+      await refresh();
+    } catch (err) {
+      setImportStatus(err instanceof Error ? err.message : 'Import failed.');
+    }
+  };
+
+  const setTone = async (tone: string) => {
+    await props.api.patchProfile({ tone });
+    await refresh();
+  };
+
+  const deleteProfile = async () => {
+    const res = await props.api.deleteProfile();
+    setImportStatus(res.confirmation);
+    await refresh();
+  };
+
+  const describeProfile = (p: ProfileView): string[] => {
+    const lines: string[] = [];
+    const a = p.attributes;
+    if (a.tone) lines.push(a.tone === 'brief' ? 'You prefer brief confirmations.' : `You prefer a ${a.tone} tone.`);
+    if (a.decompositionGranularity)
+      lines.push(
+        a.decompositionGranularity === 'coarse'
+          ? 'You like tasks broken into fewer, larger steps.'
+          : a.decompositionGranularity === 'fine'
+            ? 'You like tasks broken into many small steps.'
+            : 'You like a moderate level of task breakdown.',
+      );
+    if (a.vocabulary?.length) lines.push(`Your world: ${a.vocabulary.slice(0, 6).join(', ')}.`);
+    lines.push(p.storage === 'on-device-only' ? 'Derived on your device — raw chats never uploaded.' : 'Derived from your import; the raw file was not kept.');
+    return lines;
+  };
 
   const toggle = async (key: string, next: boolean) => {
     try {
@@ -85,6 +130,79 @@ export function SettingsScreen(props: {
       ))}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      <Text style={styles.section}>Personalization</Text>
+      {consents.chat_import?.granted ? (
+        <>
+          {profile ? (
+            <View style={styles.profileBox}>
+              {describeProfile(profile).map((line, i) => (
+                <Text key={i} style={styles.profileLine}>
+                  • {line}
+                </Text>
+              ))}
+              <View style={styles.toneRow}>
+                <Text style={styles.detail}>Confirmation tone:</Text>
+                {(['brief', 'neutral', 'warm'] as const).map((t) => (
+                  <Pressable
+                    key={t}
+                    style={[styles.tonePill, profile.attributes.tone === t && styles.tonePillActive]}
+                    onPress={() => void setTone(t)}
+                  >
+                    <Text
+                      style={[
+                        styles.tonePillText,
+                        profile.attributes.tone === t && styles.tonePillTextActive,
+                      ]}
+                    >
+                      {t}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={styles.buttonDanger} onPress={() => void deleteProfile()}>
+                <Text style={styles.buttonDangerText}>Delete profile & all import data</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.detail}>
+              Import your assistant chat history to tailor task breakdown, tone, and scheduling.
+              Only a structured profile is kept — the raw export is discarded after processing.
+            </Text>
+          )}
+          <View style={styles.sourceRow}>
+            {(['claude', 'chatgpt', 'gemini', 'generic'] as const).map((s) => (
+              <Pressable
+                key={s}
+                style={[styles.tonePill, importSource === s && styles.tonePillActive]}
+                onPress={() => setImportSource(s)}
+              >
+                <Text style={[styles.tonePillText, importSource === s && styles.tonePillTextActive]}>{s}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            style={styles.importInput}
+            placeholder="paste your export (JSON or text)…"
+            placeholderTextColor={colors.textDim}
+            value={importText}
+            onChangeText={setImportText}
+            multiline
+          />
+          <Pressable
+            style={styles.buttonGhost}
+            onPress={() => void runImport()}
+            disabled={!importText.trim()}
+          >
+            <Text style={styles.buttonGhostText}>Import & derive profile</Text>
+          </Pressable>
+          {importStatus ? <Text style={styles.importStatus}>{importStatus}</Text> : null}
+        </>
+      ) : (
+        <Text style={styles.detail}>
+          Enable “Chat import & profile” above to personalize Scrible from your assistant history.
+        </Text>
+      )}
+
       <Text style={styles.section}>Sync</Text>
       <Text style={styles.detail}>
         {pending === 0
@@ -122,6 +240,16 @@ const styles = StyleSheet.create({
   buttonGhost: { borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 10 },
   buttonGhostText: { color: colors.text, fontWeight: '600' },
   buttonDanger: { backgroundColor: colors.danger, borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 14 },
+  profileBox: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 12 },
+  profileLine: { color: colors.text, fontSize: 13, lineHeight: 20, marginBottom: 4 },
+  toneRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' },
+  sourceRow: { flexDirection: 'row', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+  tonePill: { borderColor: colors.border, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  tonePillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  tonePillText: { color: colors.textDim, fontSize: 12 },
+  tonePillTextActive: { color: colors.accentText, fontWeight: '700' },
+  importInput: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 12, color: colors.text, fontSize: 13, padding: 12, marginTop: 8, minHeight: 70, textAlignVertical: 'top' },
+  importStatus: { color: colors.reminder, fontSize: 12, marginTop: 8 },
   buttonDangerText: { color: '#fff', fontWeight: '700' },
   footnote: { color: colors.textDim, fontSize: 11, marginTop: 10, marginBottom: 40 },
 });

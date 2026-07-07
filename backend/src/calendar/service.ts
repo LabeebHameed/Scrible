@@ -13,6 +13,7 @@ import type { SyncEngine } from '../modules/sync.js';
 import type { Orchestrator } from '../ai/orchestrator.js';
 import type { CalendarLinkRef, ProviderRegistry } from './provider.js';
 import type { Item } from '../types.js';
+import { loadEffectiveProfile } from '../modules/profile.js';
 
 const WINDOW_PAST_MS = 24 * 3600_000;
 const WINDOW_FUTURE_MS = 30 * 24 * 3600_000;
@@ -237,9 +238,7 @@ export class CalendarService {
       working_hours: string;
       timezone: string;
     };
-    const profileRow = this.db.prepare('SELECT attributes FROM profiles WHERE user_id = ?').get(userId) as
-      | { attributes: string }
-      | undefined;
+    const profile = loadEffectiveProfile(this.db, userId);
     try {
       return await this.orchestrator.run('schedule', {
         itemTitle: item.title,
@@ -250,7 +249,7 @@ export class CalendarService {
           workingHours: JSON.parse(user.working_hours),
           timezone: user.timezone,
         },
-        profile: profileRow ? JSON.parse(profileRow.attributes) : null,
+        profile,
       });
     } catch {
       return null;

@@ -49,6 +49,10 @@ heuristic fallback), `FLAG_*` feature flags.
   browser startup / return-from-idle, one-per-session popup with complete/snooze,
   minimal permission set, bidirectional state via the normal sync path; backend
   routing module owns where items surface.
-- [ ] **Phase 4 — Personalization**: chat-history import → transparent, editable, deletable profile.
+- [x] **Phase 4 — Personalization**: chat-history import (Claude/ChatGPT/Gemini/generic
+  parsers, user-side only), in-memory profile derivation (raw never stored),
+  transparency UI with per-attribute edit that wins over derived values, adaptation
+  into decomposition/confirmation/scheduling, on-device path, total deletion with a
+  no-surviving-data test.
 - [ ] **Phase 5 — Analytics & compliance**: consent-gated event taxonomy, store compliance packages.
 - [ ] **Phase 6 — Polish**: edge-case hardening, accessibility, launch readiness.

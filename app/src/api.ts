@@ -16,6 +16,22 @@ export interface ApiClient {
   revokeConsent(category: string): Promise<void>;
   deleteAccount(): Promise<{ confirmation: string }>;
   undoBlock(blockId: string): Promise<void>;
+  getProfile(): Promise<ProfileView | null>;
+  patchProfile(edits: Record<string, unknown>): Promise<void>;
+  deleteProfile(): Promise<{ confirmation: string }>;
+  importChats(source: string, content: string): Promise<{ profile: Record<string, unknown> }>;
+}
+
+export interface ProfileView {
+  attributes: {
+    tone?: string;
+    verbosity?: string;
+    decompositionGranularity?: string;
+    vocabulary?: string[];
+  };
+  overrides: Record<string, unknown>;
+  sources: string[];
+  storage: string;
 }
 
 export class HttpApi implements ApiClient {
@@ -79,5 +95,21 @@ export class HttpApi implements ApiClient {
   }
   async undoBlock(blockId: string) {
     await this.req('POST', `/v1/schedule/${blockId}/undo`);
+  }
+  async getProfile() {
+    try {
+      return await this.req<ProfileView>('GET', '/v1/profile');
+    } catch {
+      return null;
+    }
+  }
+  async patchProfile(edits: Record<string, unknown>) {
+    await this.req('PATCH', '/v1/profile', edits);
+  }
+  async deleteProfile() {
+    return this.req<{ confirmation: string }>('DELETE', '/v1/profile');
+  }
+  async importChats(source: string, content: string) {
+    return this.req<{ profile: Record<string, unknown> }>('POST', '/v1/imports', { source, content });
   }
 }

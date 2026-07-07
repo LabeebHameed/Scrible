@@ -54,6 +54,16 @@ function fakeApi(): ApiClient & {
       return { confirmation: '' };
     },
     async undoBlock() {},
+    async getProfile() {
+      return null;
+    },
+    async patchProfile() {},
+    async deleteProfile() {
+      return { confirmation: '' };
+    },
+    async importChats() {
+      return { profile: {} };
+    },
   };
 }
 
