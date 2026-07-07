@@ -186,12 +186,13 @@ export function matchDoneHeuristic(input: MatchDoneInput): MatchDoneOutput {
   return { matchedId: best[0]!.id, candidates: [] };
 }
 
+const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'about', 'some', 'them', 'then', 'when', 'what', 'have', 'need', 'get', 'its']);
 const tokenize = (s: string): string[] =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .split(/\s+/)
-    .filter((w) => w.length > 2);
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 
 export function scheduleHeuristic(input: ScheduleInput): ScheduleOutput {
   const durationMs = input.itemType === 'idea' ? 3_600_000 : 1_800_000;

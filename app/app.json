@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Scrible",
+    "slug": "scrible",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "scrible",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0E0F13",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.scrible.app"
+    },
+    "android": {
+      "package": "com.scrible.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Scrible uses the microphone so you can capture tasks, ideas, and reminders by speaking.",
+          "speechRecognitionPermission": "Scrible transcribes your voice on this device to create tasks, ideas, and reminders."
+        }
+      ]
+    ]
+  }
+}

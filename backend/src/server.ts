@@ -7,6 +7,7 @@ import { registerDevices } from './modules/devices.js';
 import { registerItems } from './modules/items.js';
 import { registerSyncRoutes } from './modules/syncRoutes.js';
 import { registerAccount } from './modules/account.js';
+import { registerVoice } from './modules/voice.js';
 import { SyncEngine } from './modules/sync.js';
 import { buildOrchestrator } from './ai/index.js';
 import type { Orchestrator } from './ai/orchestrator.js';
@@ -45,6 +46,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   registerItems(app, db, sync);
   registerSyncRoutes(app, sync);
   registerAccount(app, db);
+  registerVoice(app, db, sync, orchestrator);
 
   return { app, db, sync, orchestrator, jobs, config };
 }
