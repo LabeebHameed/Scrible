@@ -48,7 +48,13 @@ export function AuthScreen(props: {
         onChangeText={setPassword}
       />
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Pressable style={styles.button} onPress={submit} disabled={busy}>
+      <Pressable
+        style={styles.button}
+        onPress={submit}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel={mode === 'login' ? 'Sign in' : 'Create account'}
+      >
         <Text style={styles.buttonText}>
           {busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}
         </Text>

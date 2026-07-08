@@ -2,30 +2,32 @@
 
 This document hands the Scrible codebase to a new agent or engineer. It explains
 what exists, how it is structured, how to run and test it, the conventions to keep,
-and exactly what remains (Phases 5–6). Read this first, then `docs/BUILD_PLAN.md`
+and the remaining pre-launch work. Read this first, then `docs/BUILD_PLAN.md`
 (the product spec) and `docs/decisions/0001-phase-0-tech-stack.md` (why the stack).
 
-Last updated at the end of **Phase 4** (Personalization).
+Last updated at the end of **Phase 6** — all build-plan phases are implemented; §6 below lists the remaining pre-launch work (device QA, chaos/load drills, store submission).
 
 ---
 
 ## 1. TL;DR — current state
 
-- **Phases 0–4 are complete, tested, committed, and pushed.** Phases 5–6 remain.
+- **All phases (0–6) are complete, tested, committed, and pushed.** What remains is
+  pre-launch operational work: on-device QA, chaos/load drills, store submissions
+  (see docs/launch-checklist.md).
 - **Two runnable packages** in an npm-workspaces monorepo: `backend/` (Fastify +
   SQLite) and `app/` (Expo / React Native, runs on iOS, Android, and web). Plus a
   build-less `extension/` (Chrome MV3).
 - **Everything works with no API keys and no cloud accounts.** Every AI capability
   has a deterministic heuristic fallback; the calendar has an in-process "internal"
   provider; notifications write to a DB outbox. Adding real providers is additive.
-- **Test status:** 42 backend tests + 4 app tests, all green. `npm run typecheck`
+- **Test status:** 58 backend tests + 4 app tests, all green. `npm run typecheck`
   and `npm test` are clean at the repo root.
 
 ```bash
 git clone <repo> && cd Scrible
 npm install
 npm run typecheck      # both workspaces
-npm test               # 46 tests, all green
+npm test               # 62 tests, all green
 npm run dev -w backend # API on :8787
 npm run web -w app     # web client (also: expo start for native)
 ```
@@ -140,9 +142,9 @@ Feature flags: `FLAG_AUTO_CLASSIFY`, `FLAG_AUTO_SCHEDULE`, `FLAG_PERSONALIZATION
 
 ---
 
-## 6. What remains
+## 6. What remains (phases now built — kept for context on where each landed)
 
-### Phase 5 — Analytics & Compliance (`docs/BUILD_PLAN.md` §10)
+### Phase 5 — Analytics & Compliance — DONE: see `backend/src/analytics/`, `modules/analyticsRoutes.ts`, `scripts/dsr.ts`, `docs/privacy-policy.md`, `docs/compliance/`
 - Event taxonomy (activation, voice-capture success, core-loop health, scheduling,
   cross-device, personalization, retention) behind a **consent-gated forwarding
   layer** — one in-house layer that enforces schema, strips sensitive fields, applies
@@ -157,7 +159,7 @@ Feature flags: `FLAG_AUTO_CLASSIFY`, `FLAG_AUTO_SCHEDULE`, `FLAG_PERSONALIZATION
 - Suggested: `backend/src/analytics/` (forwarding layer + taxonomy), `modules/analyticsRoutes.ts`,
   `modules/exportRoutes.ts`, `docs/privacy-policy.md`, `docs/compliance/`.
 
-### Phase 6 — Polish / End-Version (`docs/BUILD_PLAN.md` §11)
+### Phase 6 — Polish — DONE: see `test/edge-cases.test.ts`, `docs/runbooks.md`, `docs/launch-checklist.md`. Remaining pre-launch items live in the checklist (device QA, chaos/load drills, store submission).
 - Cross-platform consistency audit; performance budgets; **edge-case hardening**
   (offline matrix, ambiguous/multi-item voice input, timezone/DST, sync pathologies —
   same item completed on two offline devices, clock skew, reinstall restore);

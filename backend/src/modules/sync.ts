@@ -109,9 +109,13 @@ export class SyncEngine {
         results.push({ opId: op.opId, status: 'duplicate' });
         continue;
       }
+      // Clock-skew guard (plan §11.3): a client with a fast clock must not poison
+      // per-field LWW timestamps far into the future (which would make every later
+      // legitimate edit look stale). Clamp to now + 5 minutes.
+      const clamped = { ...op, ts: Math.min(op.ts, Date.now() + 5 * 60_000) };
       let status: string;
       try {
-        status = this.applyOne(userId, op, createdItems);
+        status = this.applyOne(userId, clamped, createdItems);
       } catch (err) {
         status = `error:${err instanceof Error ? err.message : 'unknown'}`;
       }

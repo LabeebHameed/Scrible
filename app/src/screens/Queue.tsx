@@ -55,7 +55,12 @@ function ItemCard(props: { item: Item; store: SyncStore }) {
         <Pressable style={styles.cardBody} onPress={() => setOpen(!open)}>
           <Text style={styles.title}>{item.title}</Text>
           <View style={styles.metaRow}>
-            <Pressable onPress={cycleType} style={[styles.chip, { borderColor: typeColor[item.type] }]}>
+            <Pressable
+              onPress={cycleType}
+              style={[styles.chip, { borderColor: typeColor[item.type] }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Type: ${item.type}. Tap to correct.`}
+            >
               <Text style={[styles.chipText, { color: typeColor[item.type] }]}>{item.type}</Text>
             </Pressable>
             {item.timeIntent?.at ? (

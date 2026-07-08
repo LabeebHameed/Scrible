@@ -119,7 +119,14 @@ export default function App() {
             ['settings', 'Settings'],
           ] as Array<[Tab, string]>
         ).map(([key, label]) => (
-          <Pressable key={key} style={styles.tab} onPress={() => setTab(key)}>
+          <Pressable
+            key={key}
+            style={styles.tab}
+            onPress={() => setTab(key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === key }}
+            accessibilityLabel={`${label} tab`}
+          >
             <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
           </Pressable>
         ))}

@@ -59,4 +59,7 @@ heuristic fallback), `FLAG_*` feature flags.
   forwarding layer under a random pseudonymous ID (revocation permanently unlinks
   history), GDPR data export, audited DSR CLI with deletion verification, privacy
   policy + iOS/Play/Chrome-Web-Store compliance packages.
-- [ ] **Phase 6 — Polish**: edge-case hardening, accessibility, launch readiness.
+- [x] **Phase 6 — Polish**: edge-case hardening with fixes (multi-item utterance
+  splitting, clock-skew clamping, double-offline-completion merge, DST-safe
+  recurrence, ambiguous-done disambiguation), accessibility roles/labels, ops
+  runbooks, and the launch-readiness checklist.

@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { AppContext } from './server.js';
 import type { ItemType } from './types.js';
 import { loadEffectiveProfile } from './modules/profile.js';
+import { splitUtterance } from './ai/providers/heuristic.js';
 
 export function enableEnrichment(ctx: AppContext): void {
   if (!ctx.config.flags.autoClassify) return;
@@ -17,6 +18,26 @@ export function enableEnrichment(ctx: AppContext): void {
       const item = sync.itemById(userId, itemId);
       if (!item || item.status !== 'captured') return; // user already typed it or acted
       sync.serverUpdateItem(userId, itemId, { status: 'processing' });
+
+      // Multi-item utterance: split before classification; the original item keeps
+      // the first part, each extra part becomes its own item (enriched in turn).
+      const parts = splitUtterance(item.rawText);
+      if (parts.length > 1) {
+        sync.serverUpdateItem(userId, itemId, { rawText: parts[0], title: parts[0] });
+        const extraOps = parts.slice(1).map((part) => ({
+          opId: randomUUID(),
+          ts: Date.now(),
+          kind: 'item.create' as const,
+          entityId: randomUUID(),
+          data: { rawText: part, source: item.source },
+        }));
+        sync.applyOps(userId, extraOps);
+        sync.audit(userId, 'item.split', 'item', itemId, { parts: parts.length }, false);
+        // Reload with the trimmed text before classifying.
+        const updated = sync.itemById(userId, itemId);
+        if (!updated) return;
+        item.rawText = updated.rawText;
+      }
 
       const user = db.prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as
         | { timezone: string }

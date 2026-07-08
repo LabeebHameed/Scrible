@@ -89,6 +89,19 @@ export function parseTimeIntent(text: string, now = new Date()): TimeIntent | nu
   return null;
 }
 
+/**
+ * Multi-item utterances (plan §11.3): "remind me to call mom and also I have an
+ * idea about…" splits into separate items. Conservative: only explicit connectors
+ * split; a plain "and" never does (that's decomposition's job, not capture's).
+ */
+export function splitUtterance(text: string): string[] {
+  const parts = text
+    .split(/\s+(?:and also|also remind me|and remind me|oh and|and another thing[,:]?)\s+/i)
+    .map((p) => p.trim())
+    .filter((p) => p.split(/\s+/).length >= 2);
+  return parts.length >= 2 ? parts.slice(0, 5) : [text];
+}
+
 const COMPUTER_ACTION =
   /\b(post|tweet|email|e-mail|reply to|browser|website|upload|publish|laptop|computer|online|on x\b|github|linkedin|instagram|youtube|blog)\b/i;
 const REMINDER_HINT = /\b(remind|reminder|don't forget|dont forget|remember to)\b/i;
