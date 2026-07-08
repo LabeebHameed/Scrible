@@ -107,9 +107,34 @@ const COMPUTER_ACTION =
 const REMINDER_HINT = /\b(remind|reminder|don't forget|dont forget|remember to)\b/i;
 const IDEA_HINT = /\b(idea|what if|maybe (?:we|i) (?:could|should)|concept|brainstorm|thought:?|i was thinking)\b/i;
 
+/**
+ * Extract a desktop app-launch trigger: "when I open Photoshop", "next time I'm in
+ * Figma". Conservative — only explicit open/launch/in-app phrasing qualifies.
+ */
+export function parseAppTrigger(text: string): string | null {
+  const stop =
+    '(?=$|[,.!?;]| to\\b| next\\b| again\\b| later\\b| and\\b| remind\\b| i\\b| update\\b| check\\b| fix\\b| finish\\b| review\\b| send\\b| post\\b| write\\b| do\\b| go\\b| make\\b| create\\b| export\\b| upload\\b| edit\\b| look\\b| add\\b| clean\\b| reply\\b)';
+  const patterns = [
+    new RegExp(
+      `\\bwhen(?:ever)? i(?:'m| am)? (?:next )?(?:open|launch|start|use|get(?: back)? (?:in|into|on)|(?:'m |am )?(?:in|on))\\s+([a-z0-9][\\w .+-]{1,30}?)${stop}`,
+      'i',
+    ),
+    new RegExp(`\\bnext time i(?:'m| am)? (?:open|launch|start|use|in|on)\\s+([a-z0-9][\\w .+-]{1,30}?)${stop}`, 'i'),
+  ];
+  for (const re of patterns) {
+    const match = text.match(re);
+    const name = match?.[1]?.trim().replace(/^(the|my)\s+/i, '').toLowerCase();
+    if (name && name.length >= 3 && !['chrome', 'the browser', 'browser'].includes(name)) {
+      return name;
+    }
+  }
+  return null;
+}
+
 export function classifyHeuristic(input: ClassifyInput): ClassifyOutput {
   const text = input.text.trim();
   const timeIntent = parseTimeIntent(text);
+  const appTrigger = parseAppTrigger(text);
   let type: ClassifyOutput['type'] = 'task';
   let confidence = 0.55;
   if (REMINDER_HINT.test(text) || (timeIntent && !IDEA_HINT.test(text))) {
@@ -120,8 +145,9 @@ export function classifyHeuristic(input: ClassifyInput): ClassifyOutput {
     type = 'idea';
     confidence = 0.85;
   }
-  const contextTag = type !== 'idea' && COMPUTER_ACTION.test(text) ? 'computer-action' : null;
-  return { type, confidence, timeIntent, contextTag, title: cleanTitle(text) };
+  const contextTag =
+    type !== 'idea' && (COMPUTER_ACTION.test(text) || appTrigger) ? 'computer-action' : null;
+  return { type, confidence, timeIntent, contextTag, appTrigger, title: cleanTitle(text) };
 }
 
 export function cleanTitle(text: string): string {

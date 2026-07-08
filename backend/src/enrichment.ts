@@ -89,6 +89,7 @@ export function enableEnrichment(ctx: AppContext): void {
         title: cls.title,
         confidence: cls.confidence,
         contextTag: cls.contextTag,
+        appTrigger: cls.appTrigger,
         timeIntent: cls.timeIntent,
         summary: confirm.message,
         status: 'active',

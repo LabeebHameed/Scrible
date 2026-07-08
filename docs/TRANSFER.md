@@ -41,6 +41,7 @@ npm run web -w app     # web client (also: expo start for native)
 | `backend/` | System of record. Fastify API v1, SQLite (portable SQL → Postgres in prod). |
 | `app/` | Expo client (iOS/Android/web). The web build is also the "web dashboard". |
 | `extension/` | Chrome MV3 extension (plain JS, no build step). |
+| `desktop/` | Tauri 2 tray app: Rust `watcher-core` (process-launch diff, cargo-tested) + TS frontend with local matching (`src/matcher.ts`, Node-tested). See `desktop/README.md`. |
 | `docs/BUILD_PLAN.md` | The full product spec. Phase definitions and "done" criteria. |
 | `docs/decisions/0001-phase-0-tech-stack.md` | Stack decision record (ADR). |
 | `docs/data-classification.md` | Every field's sensitivity, retention, deletion path. Update when the schema changes. |
@@ -108,6 +109,9 @@ npm run web -w app     # web client (also: expo start for native)
    feed and carries an undo where reversible.
 6. **Calendar safety:** Scrible only ever edits events it created; external calendar
    wins for foreign events; foreign events displace Scrible blocks (never silently).
+7. **Desktop watcher privacy:** running-app/process names never leave the machine —
+   the server serves app-triggered items (`/v1/desktop/checkin`) and the desktop app
+   matches locally. Never add an endpoint that accepts process lists.
 
 ---
 

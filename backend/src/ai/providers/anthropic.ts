@@ -60,13 +60,14 @@ export class AnthropicProvider {
       timeAtIso: string | null;
       recurrence: string | null;
       computerAction: boolean;
+      appTrigger: string | null;
     }>(
-      `You classify a voice-captured note into exactly one of: task (something to do), idea (a thought/concept to develop later), reminder (time-bound nudge). Extract any explicit time expression. Flag when the item requires being at a computer/browser (posting online, email, publishing, coding). Current local time: ${new Date().toISOString()} in timezone ${input.context.timezone}. Resolve relative times against that. Produce a short cleaned title (max 60 chars) without filler like "remind me to".`,
+      `You classify a voice-captured note into exactly one of: task (something to do), idea (a thought/concept to develop later), reminder (time-bound nudge). Extract any explicit time expression. Flag when the item requires being at a computer/browser (posting online, email, publishing, coding). If the item should surface when a specific desktop application is opened ("when I open Photoshop…"), extract that application's name (lowercase) as appTrigger; otherwise null. Current local time: ${new Date().toISOString()} in timezone ${input.context.timezone}. Resolve relative times against that. Produce a short cleaned title (max 60 chars) without filler like "remind me to".`,
       JSON.stringify({ transcript: input.text, localHour: input.context.localHour, recentTypes: input.context.recentTypes }),
       {
         type: 'object',
         additionalProperties: false,
-        required: ['type', 'confidence', 'title', 'timePhrase', 'timeAtIso', 'recurrence', 'computerAction'],
+        required: ['type', 'confidence', 'title', 'timePhrase', 'timeAtIso', 'recurrence', 'computerAction', 'appTrigger'],
         properties: {
           type: { type: 'string', enum: ['task', 'idea', 'reminder'] },
           confidence: { type: 'number' },
@@ -75,6 +76,7 @@ export class AnthropicProvider {
           timeAtIso: { type: ['string', 'null'], format: 'date-time' },
           recurrence: { type: ['string', 'null'] },
           computerAction: { type: 'boolean' },
+          appTrigger: { type: ['string', 'null'] },
         },
       },
     );
@@ -97,7 +99,8 @@ export class AnthropicProvider {
       confidence: Math.max(0, Math.min(1, out.confidence)),
       title: out.title.trim() ? out.title.slice(0, 80) : cleanTitle(input.text),
       timeIntent: timeIntent && (timeIntent.at || timeIntent.phrase) ? timeIntent : null,
-      contextTag: out.computerAction ? 'computer-action' : null,
+      contextTag: out.computerAction || out.appTrigger ? 'computer-action' : null,
+      appTrigger: out.appTrigger ? out.appTrigger.toLowerCase().slice(0, 40) : null,
     };
   }
 

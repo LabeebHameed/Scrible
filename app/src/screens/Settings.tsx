@@ -11,6 +11,7 @@ const CONSENTS: Array<{ key: string; label: string; detail: string }> = [
   { key: 'calendar_access', label: 'Calendar access', detail: 'Read free/busy and write Scrible blocks to your calendar.' },
   { key: 'chat_import', label: 'Chat import & profile', detail: 'Derive a working-style profile from imported assistant chats.' },
   { key: 'analytics', label: 'Product analytics', detail: 'Anonymous usage events. Never your words or titles.' },
+  { key: 'app_watcher', label: 'Desktop app watcher', detail: 'Let the desktop app notice app launches to surface matching items. App names never leave that device.' },
 ];
 
 export function SettingsScreen(props: {

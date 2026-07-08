@@ -32,6 +32,8 @@ export interface ClassifyOutput {
   timeIntent: TimeIntent | null;
   /** e.g. 'computer-action' when the task implies being at a computer (Phase 3). */
   contextTag: string | null;
+  /** Named desktop app the item should surface with ("when I open Photoshop…"). */
+  appTrigger: string | null;
   /** Cleaned short title derived from the transcript. */
   title: string;
 }

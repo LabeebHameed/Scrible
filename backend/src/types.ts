@@ -19,6 +19,8 @@ export interface Item {
   confidence: number | null;
   status: ItemStatus;
   contextTag: string | null;
+  /** Desktop app-launch trigger, e.g. 'photoshop' — matched ON DEVICE only. */
+  appTrigger: string | null;
   timeIntent: TimeIntent | null;
   summary: string | null;
   createdAt: number;
@@ -81,5 +83,6 @@ export const CONSENT_CATEGORIES = [
   'calendar_access',
   'chat_import',
   'analytics',
+  'app_watcher',
 ] as const;
 export type ConsentCategory = (typeof CONSENT_CATEGORIES)[number];

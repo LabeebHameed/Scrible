@@ -13,7 +13,8 @@ architecture decisions in [docs/decisions/](docs/decisions/).
 |---|---|
 | `backend/` | System of record: auth, items, sync, consent, AI orchestration, scheduling, notifications (TypeScript / Fastify / SQLite-dev → Postgres-prod) |
 | `app/` | Client app: Expo (React Native) for iOS/Android; the web build doubles as the web dashboard. `npm run web -w app` to run; native voice capture needs a dev build (`expo-speech-recognition`), Expo Go falls back to typed input |
-| `extension/` | Chrome MV3 extension for computer-action reminders *(Phase 3+)* |
+| `extension/` | Chrome MV3 extension for computer-action reminders |
+| `desktop/` | Tauri 2 tray app: background app-launch watcher with local-only matching (`desktop/README.md`) |
 | `docs/` | Build plan, decision records, data classification, compliance |
 
 ## Development
@@ -63,3 +64,7 @@ heuristic fallback), `FLAG_*` feature flags.
   splitting, clock-skew clamping, double-offline-completion merge, DST-safe
   recurrence, ambiguous-done disambiguation), accessibility roles/labels, ops
   runbooks, and the launch-readiness checklist.
+- [x] **Phase 7 — Desktop companion**: Tauri 2 tray app whose background watcher
+  notices app launches ("when I open Photoshop…") and pops matching items —
+  process names are diffed and matched on-device only, gated behind the
+  `app_watcher` consent; classification extracts `appTrigger` from captures.

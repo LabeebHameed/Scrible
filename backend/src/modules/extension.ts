@@ -39,6 +39,30 @@ export function registerExtension(app: FastifyInstance, db: Db, sync: SyncEngine
     return { items };
   });
 
+  /**
+   * Desktop check-in (Phase 7): returns ALL open app-triggered items. The desktop
+   * app matches them against locally-observed app launches — process/app names are
+   * never accepted by (or sent to) this endpoint, by design.
+   */
+  app.post('/v1/desktop/checkin', { preHandler: app.authenticate }, async (req) => {
+    const { deviceId } = (req.body ?? {}) as { deviceId?: string };
+    if (deviceId) {
+      db.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND user_id = ?').run(
+        Date.now(),
+        deviceId,
+        req.userId,
+      );
+    }
+    const rows = db
+      .prepare(
+        `SELECT * FROM items WHERE user_id = ? AND app_trigger IS NOT NULL
+         AND status IN ('captured','processing','active','scheduled')
+         ORDER BY created_at LIMIT 50`,
+      )
+      .all(req.userId) as Array<Record<string, unknown>>;
+    return { items: rows.map(rowToItem) };
+  });
+
   /** The popup records what it actually surfaced (frequency-capping signal). */
   app.post('/v1/extension/shown', { preHandler: app.authenticate }, async (req) => {
     const { itemIds } = (req.body ?? {}) as { itemIds?: string[] };

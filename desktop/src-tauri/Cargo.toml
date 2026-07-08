@@ -1,0 +1,17 @@
+[package]
+name = "scrible-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Scrible desktop companion: app-launch watcher with local-only matching"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+watcher-core = { path = "../watcher-core" }
+
+[profile.release]
+strip = true
+lto = true

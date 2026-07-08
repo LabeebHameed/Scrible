@@ -36,6 +36,7 @@ export interface Item {
   confidence: number | null;
   status: ItemStatus;
   contextTag: string | null;
+  appTrigger: string | null;
   timeIntent: TimeIntent | null;
   summary: string | null;
   createdAt: number;

@@ -10,8 +10,8 @@ export function registerDevices(app: FastifyInstance, db: Db): void {
       capabilities?: Record<string, unknown>;
       deviceId?: string;
     };
-    if (!platform || !['ios', 'android', 'web', 'extension'].includes(platform)) {
-      return reply.code(400).send({ error: 'platform must be ios|android|web|extension' });
+    if (!platform || !['ios', 'android', 'web', 'extension', 'desktop'].includes(platform)) {
+      return reply.code(400).send({ error: 'platform must be ios|android|web|extension|desktop' });
     }
     const id = deviceId ?? randomUUID();
     const existing = db

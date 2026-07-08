@@ -1,0 +1,8 @@
+[package]
+name = "watcher-core"
+version = "0.1.0"
+edition = "2021"
+description = "Scrible desktop: cross-platform process snapshot + launch-diff logic (no GUI deps, fully unit-testable)"
+
+[dependencies]
+sysinfo = "0.33"

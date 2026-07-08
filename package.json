@@ -5,7 +5,8 @@
   "description": "Scrible — voice-first task & calendar system (monorepo)",
   "workspaces": [
     "backend",
-    "app"
+    "app",
+    "desktop"
   ],
   "scripts": {
     "test": "npm test --workspaces --if-present",

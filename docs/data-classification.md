@@ -12,6 +12,7 @@ Sensitivity levels: **S3** highly sensitive · **S2** personal · **S1** operati
 | Timezone, working hours, notification prefs | `users` | S2 | Life of account | Account deletion |
 | Consent records | `consents` | S1 (legal) | Life of account | Account deletion (consent history is deleted with the account; revocation itself is recorded, not deleted) |
 | Item transcript / title / type / status | `items` | S2 | Until item deleted by user | Item delete op; account deletion |
+| Item app-launch trigger (`app_trigger`) | `items` | S2 | With item | Cascade with item; account deletion. Matched against process names ON the desktop device only — running-app names are never uploaded or stored server-side. |
 | Sub-tasks | `subtasks` | S2 | With parent item | Cascade with item; account deletion |
 | Schedule blocks | `schedule_blocks` | S2 | With item | Cascade; account deletion; external calendar event removed on undo (Phase 2) |
 | Reminder triggers + delivery log | `reminder_triggers` | S2 | With item | Cascade; account deletion |
@@ -35,6 +36,7 @@ Sensitivity levels: **S3** highly sensitive · **S2** personal · **S1** operati
 | `calendar_access` | (c) calendar access | Calendar links & sync |
 | `chat_import` | (d) chat-history import & profile derivation | Imports + personality profile |
 | `analytics` | (e) product analytics | Event emission |
+| `app_watcher` | (f) desktop app-launch watching | Desktop watcher runs; nothing stored server-side (revocation stops the watcher on-device) |
 
 Revoking a consent triggers the corresponding data-handling change automatically
 (`backend/src/modules/consent.ts` revocation hooks).

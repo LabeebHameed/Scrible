@@ -141,8 +141,8 @@ export class SyncEngine {
         const now = Date.now();
         this.db
           .prepare(
-            `INSERT INTO items (id, user_id, type, source, raw_text, title, status, context_tag, time_intent, field_versions, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO items (id, user_id, type, source, raw_text, title, status, context_tag, app_trigger, time_intent, field_versions, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             op.entityId,
@@ -153,6 +153,7 @@ export class SyncEngine {
             String(d.title ?? rawText).slice(0, 200),
             typeof d.type === 'string' ? 'active' : 'captured',
             typeof d.contextTag === 'string' ? d.contextTag : null,
+            typeof d.appTrigger === 'string' ? d.appTrigger : null,
             d.timeIntent ? JSON.stringify(d.timeIntent) : null,
             '{}',
             op.ts || now,
@@ -170,13 +171,14 @@ export class SyncEngine {
           string,
           number
         >;
-        const editable = ['title', 'rawText', 'type', 'status', 'contextTag', 'timeIntent', 'summary', 'confidence'] as const;
+        const editable = ['title', 'rawText', 'type', 'status', 'contextTag', 'appTrigger', 'timeIntent', 'summary', 'confidence'] as const;
         const colOf: Record<string, string> = {
           title: 'title',
           rawText: 'raw_text',
           type: 'type',
           status: 'status',
           contextTag: 'context_tag',
+          appTrigger: 'app_trigger',
           timeIntent: 'time_intent',
           summary: 'summary',
           confidence: 'confidence',
@@ -370,6 +372,7 @@ export function rowToItem(r: Record<string, unknown>): Item {
     confidence: r.confidence == null ? null : Number(r.confidence),
     status: r.status as Item['status'],
     contextTag: r.context_tag == null ? null : String(r.context_tag),
+    appTrigger: r.app_trigger == null ? null : String(r.app_trigger),
     timeIntent: r.time_intent ? JSON.parse(String(r.time_intent)) : null,
     summary: r.summary == null ? null : String(r.summary),
     createdAt: Number(r.created_at),

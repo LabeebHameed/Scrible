@@ -114,6 +114,7 @@ export class SyncStore {
       confidence: null,
       status: 'captured',
       contextTag: null,
+      appTrigger: null,
       timeIntent: null,
       summary: null,
       createdAt: now,

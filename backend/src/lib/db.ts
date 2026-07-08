@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS items (
   confidence REAL,
   status TEXT NOT NULL DEFAULT 'captured',
   context_tag TEXT,
+  app_trigger TEXT,
   time_intent TEXT,
   summary TEXT,
   field_versions TEXT NOT NULL DEFAULT '{}',
@@ -246,6 +247,13 @@ export function openDb(path: string): Db {
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
+  // Additive migrations for pre-existing dev databases (CREATE TABLE IF NOT EXISTS
+  // won't alter an existing table).
+  try {
+    db.exec('ALTER TABLE items ADD COLUMN app_trigger TEXT');
+  } catch {
+    /* column already exists */
+  }
   return db;
 }
 

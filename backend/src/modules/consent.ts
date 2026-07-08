@@ -25,6 +25,9 @@ export const revocationHooks: Record<ConsentCategory, RevocationHook> = {
   analytics: (db, userId) => ({
     analytics_ids: Number(db.prepare('DELETE FROM analytics_ids WHERE user_id = ?').run(userId).changes),
   }),
+  // App names are read and matched ON the desktop device and never uploaded —
+  // there is nothing server-side to purge; the desktop app stops its watcher.
+  app_watcher: () => ({}),
 };
 
 export function currentConsents(db: Db, userId: string): Record<string, unknown> {
