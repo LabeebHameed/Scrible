@@ -16,6 +16,8 @@ export const CONTRACT_VERSIONS = {
 } as const;
 
 export interface ClassifyInput {
+  /** Present at real call sites; used only in code (learned provider) — never sent to Claude. */
+  userId?: string;
   text: string;
   context: {
     /** Local hour-of-day at capture (0-23). */
@@ -71,6 +73,8 @@ export interface ConfirmOutput {
 }
 
 export interface MatchDoneInput {
+  /** Present at real call sites; used only in code (learned provider) — never sent to Claude. */
+  userId?: string;
   utterance: string;
   openItems: Array<{ id: string; title: string }>;
 }

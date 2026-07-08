@@ -21,6 +21,7 @@ Sensitivity levels: **S3** highly sensitive · **S2** personal · **S1** operati
 | Voice audio (cloud quality pass) | object storage | **S3** | Transient (deleted after pass) unless consent (b) | Immediate post-processing delete; consent (b) revocation; account deletion |
 | Chat-import raw files | object storage (isolated bucket) | **S3** | ≤ 7 days (retention deadline on `import_jobs`) | Auto-delete at deadline; total-deletion action; consent (d) revocation; account deletion |
 | Personality profile | `profiles` | **S3** | Life of consent (d) | Profile delete button; consent (d) revocation; account deletion |
+| Learned context signals (keyword→outcome weights from in-app corrections/edits — never sentences) | `learned_signals` | S2 | Life of consent (d); capped at 200 rows/user, decayed on prune | Profile delete button; consent (d) revocation; account deletion |
 | Import job metadata + deletion audit | `import_jobs` | S2 | Life of account | Account deletion (deletion audit rows persist until account deletion as proof-of-erasure) |
 | Audit/undo log | `audit_log` | S2 | 90 days rolling | Rolling expiry; account deletion |
 | Change feed | `changes` | S2 | 30 days rolling (clients past the horizon full-resync) | Rolling expiry; account deletion |

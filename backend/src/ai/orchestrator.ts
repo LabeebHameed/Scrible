@@ -12,6 +12,8 @@ import { CONTRACT_VERSIONS } from './contracts.js';
 export interface Provider<C extends Capability> {
   name: string;
   run(input: CapabilityMap[C]['in']): Promise<CapabilityMap[C]['out']>;
+  /** Optional token usage for the output just returned (Anthropic-backed providers). */
+  usageOf?(output: CapabilityMap[C]['out']): { inputTokens: number; outputTokens: number } | undefined;
 }
 
 export interface CallMetric {
@@ -21,6 +23,8 @@ export interface CallMetric {
   durationMs: number;
   ok: boolean;
   fellBack: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export class Orchestrator {
@@ -46,6 +50,7 @@ export class Orchestrator {
       const started = Date.now();
       try {
         const out = await withTimeout(provider.run(input), this.timeoutMs);
+        const usage = provider.usageOf?.(out);
         this.metrics.push({
           capability,
           contractVersion: CONTRACT_VERSIONS[capability],
@@ -53,6 +58,7 @@ export class Orchestrator {
           durationMs: Date.now() - started,
           ok: true,
           fellBack: i > 0,
+          ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
         });
         return out;
       } catch (err) {

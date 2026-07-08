@@ -9,8 +9,10 @@
  * exceptions that must never be lost — completions and new captures always survive.
  */
 import type { Db } from '../lib/db.js';
-import type { ChangeRow, Item, Subtask, SyncOp } from '../types.js';
+import type { ChangeRow, Item, ItemType, Subtask, SyncOp } from '../types.js';
 import { randomUUID } from 'node:crypto';
+import { hasConsent } from './consent.js';
+import { learnFromCorrection, learnAppAlias } from '../ai/learning.js';
 
 type Listener = (change: ChangeRow) => void;
 
@@ -185,6 +187,7 @@ export class SyncEngine {
         };
         const sets: string[] = [];
         const vals: Array<string | number | null> = [];
+        const applied = new Set<string>();
         for (const f of editable) {
           if (!(f in d)) continue;
           // LWW per field; completions always win over concurrent edits.
@@ -204,6 +207,7 @@ export class SyncEngine {
                   : String(v),
           );
           versions[f] = op.ts;
+          applied.add(f);
         }
         if (sets.length === 0) return 'stale';
         sets.push('field_versions = ?', 'updated_at = ?');
@@ -211,11 +215,26 @@ export class SyncEngine {
         this.db
           .prepare(`UPDATE items SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
           .run(...vals, op.entityId, userId);
+        // Context engine (Phase 8): teach only from the user's OWN corrections/edits,
+        // never from our own server-originated updates (serverUpdateItem flags those).
+        const isUserOrigin = d.origin !== 'server';
         if (op.kind === 'item.retype') {
           this.audit(userId, 'classification.corrected', 'item', op.entityId, {
             from: item.type,
             to: d.type,
           });
+          if (isUserOrigin && applied.has('type') && hasConsent(this.db, userId, 'chat_import')) {
+            learnFromCorrection(this.db, userId, String(item.raw_text), item.type as ItemType, String(d.type) as ItemType);
+          }
+        }
+        if (
+          isUserOrigin &&
+          applied.has('appTrigger') &&
+          typeof d.appTrigger === 'string' &&
+          d.appTrigger &&
+          hasConsent(this.db, userId, 'chat_import')
+        ) {
+          learnAppAlias(this.db, userId, String(item.raw_text), d.appTrigger);
         }
         this.emitItem(userId, op.entityId);
         return 'updated';
@@ -319,7 +338,9 @@ export class SyncEngine {
         ts: Date.now(),
         kind: 'item.update',
         entityId: itemId,
-        data: fields,
+        // origin: 'server' excludes our own guesses from teaching the context engine
+        // (see the item.update/item.retype case above) — only user edits ever teach it.
+        data: { ...fields, origin: 'server' },
       },
     ]);
   }

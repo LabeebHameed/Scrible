@@ -226,6 +226,10 @@ export function matchDoneHeuristic(input: MatchDoneInput): MatchDoneOutput {
 }
 
 const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'about', 'some', 'them', 'then', 'when', 'what', 'have', 'need', 'get', 'its']);
+
+/** Content tokens (stopword-filtered) — shared with the context engine (learning.ts). */
+export const contentTokens = (s: string): string[] => tokenize(s);
+
 const tokenize = (s: string): string[] =>
   s
     .toLowerCase()

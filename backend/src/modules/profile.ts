@@ -15,6 +15,7 @@ import type { Orchestrator } from '../ai/orchestrator.js';
 import type { ProfileAttributes } from '../ai/contracts.js';
 import { parseImport, type ImportSource } from '../imports/parsers.js';
 import { hasConsent } from './consent.js';
+import { learnedSummary, learnedVocabulary } from '../ai/learning.js';
 
 interface StoredProfile {
   attributes: ProfileAttributes;
@@ -179,6 +180,9 @@ export function registerProfile(
       overrides: stored.profile.overrides,
       sources: stored.sources,
       storage: stored.storage,
+      // Context engine (Phase 8): patterns learned from in-app corrections/edits —
+      // never from prompts, always plain language, dies with this profile.
+      learned: learnedSummary(db, req.userId),
     };
   });
 
@@ -231,6 +235,7 @@ export function registerProfile(
       audit_rows: Number(
         runDelete(db, "DELETE FROM audit_log WHERE user_id = ? AND action LIKE 'import.%'", req.userId),
       ),
+      learned_signals: Number(runDelete(db, 'DELETE FROM learned_signals WHERE user_id = ?', req.userId)),
     };
     sync.recordChange(req.userId, 'profile', req.userId, 'delete', null);
     return {
@@ -251,7 +256,16 @@ export function registerProfile(
       userMessages: [],
       behavioralSignals: behavioralSignals(db, req.userId),
     });
-    const attributes = { ...(existing?.profile.attributes ?? {}), schedulingRhythm: derived.attributes.schedulingRhythm };
+    // Context engine (Phase 8): merge learned terms into the already-capped vocabulary
+    // field — refines which terms are in the pack, never how many (still capped at 15).
+    const mergedVocabulary = [
+      ...new Set([...(existing?.profile.attributes.vocabulary ?? []), ...learnedVocabulary(db, req.userId)]),
+    ].slice(0, 15);
+    const attributes = {
+      ...(existing?.profile.attributes ?? {}),
+      schedulingRhythm: derived.attributes.schedulingRhythm,
+      vocabulary: mergedVocabulary,
+    };
     saveProfile(
       req.userId,
       { attributes, overrides: existing?.profile.overrides ?? {} },

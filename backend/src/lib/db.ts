@@ -213,6 +213,20 @@ CREATE TABLE IF NOT EXISTS analytics_events (
 );
 CREATE INDEX IF NOT EXISTS idx_analytics_events ON analytics_events(event, ts);
 
+-- Context engine (Phase 8): capped pattern→outcome evidence learned from the user's
+-- own corrections/edits. Applied in code, NEVER appended to prompts.
+CREATE TABLE IF NOT EXISTS learned_signals (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  weight REAL NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_id, kind, key, value)
+);
+CREATE INDEX IF NOT EXISTS idx_learned_user ON learned_signals(user_id, kind, key);
+
 CREATE TABLE IF NOT EXISTS processed_ops (
   op_id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -223,6 +237,7 @@ CREATE TABLE IF NOT EXISTS processed_ops (
 
 /** Tables holding per-user rows, in FK-safe deletion order (account deletion path). */
 export const USER_DATA_TABLES = [
+  'learned_signals',
   'analytics_ids',
   'processed_ops',
   'changes',

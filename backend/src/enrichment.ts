@@ -50,6 +50,7 @@ export function enableEnrichment(ctx: AppContext): void {
       const profile = loadProfile(ctx, userId);
 
       const cls = await orchestrator.run('classify', {
+        userId,
         text: item.rawText,
         context: {
           localHour: new Date().getHours(),

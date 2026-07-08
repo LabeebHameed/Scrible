@@ -19,6 +19,7 @@ export const revocationHooks: Record<ConsentCategory, RevocationHook> = {
   chat_import: (db, userId) => ({
     profiles: Number(db.prepare('DELETE FROM profiles WHERE user_id = ?').run(userId).changes),
     import_jobs: Number(db.prepare('DELETE FROM import_jobs WHERE user_id = ?').run(userId).changes),
+    learned_signals: Number(db.prepare('DELETE FROM learned_signals WHERE user_id = ?').run(userId).changes),
   }),
   // Revoking analytics erases the pseudonymous-id mapping: emission stops (the
   // forwarding layer's consent gate) AND past events are permanently unlinked.

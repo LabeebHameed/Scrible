@@ -23,6 +23,21 @@ import { parseTimeIntent, cleanTitle } from './heuristic.js';
 
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-8';
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/**
+ * Token accounting side-channel (Phase 8): keyed by the exact output object each
+ * public method returns, so concurrent calls can never cross-contaminate usage —
+ * no shared mutable field, no race. Read via getUsage() right after a call resolves.
+ */
+const usageByOutput = new WeakMap<object, TokenUsage>();
+export function getUsage(output: object): TokenUsage | undefined {
+  return usageByOutput.get(output);
+}
+
 export class AnthropicProvider {
   private client: Anthropic;
   constructor(
@@ -37,7 +52,7 @@ export class AnthropicProvider {
     user: string,
     schema: Record<string, unknown>,
     maxTokens = 1024,
-  ): Promise<T> {
+  ): Promise<{ data: T; usage: TokenUsage }> {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: maxTokens,
@@ -48,11 +63,17 @@ export class AnthropicProvider {
     if (response.stop_reason === 'refusal') throw new Error('model refused');
     const text = response.content.find((b) => b.type === 'text');
     if (!text || text.type !== 'text') throw new Error('no text block');
-    return JSON.parse(text.text) as T;
+    return {
+      data: JSON.parse(text.text) as T,
+      usage: {
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
+      },
+    };
   }
 
   async classify(input: ClassifyInput): Promise<ClassifyOutput> {
-    const out = await this.jsonCall<{
+    const { data: out, usage } = await this.jsonCall<{
       type: 'task' | 'idea' | 'reminder';
       confidence: number;
       title: string;
@@ -94,7 +115,7 @@ export class AnthropicProvider {
             ...(out.recurrence ? { recurrence: out.recurrence } : {}),
           }
         : null;
-    return {
+    const result: ClassifyOutput = {
       type: out.type,
       confidence: Math.max(0, Math.min(1, out.confidence)),
       title: out.title.trim() ? out.title.slice(0, 80) : cleanTitle(input.text),
@@ -102,11 +123,13 @@ export class AnthropicProvider {
       contextTag: out.computerAction || out.appTrigger ? 'computer-action' : null,
       appTrigger: out.appTrigger ? out.appTrigger.toLowerCase().slice(0, 40) : null,
     };
+    usageByOutput.set(result, usage);
+    return result;
   }
 
   async decompose(input: DecomposeInput): Promise<DecomposeOutput> {
     const granularity = input.profile?.decompositionGranularity ?? 'medium';
-    const out = await this.jsonCall<{ subtasks: string[] }>(
+    const { data: out, usage } = await this.jsonCall<{ subtasks: string[] }>(
       `You break a captured ${input.type} into concrete, ordered sub-tasks. Rules: if the item is small enough to do in one sitting, return an empty list — never manufacture busywork. Granularity preference: ${granularity} (coarse = 2-3 large steps, medium = up to 5, fine = up to 8 small steps). Each sub-task is a short imperative phrase.`,
       JSON.stringify({ text: input.text }),
       {
@@ -116,13 +139,15 @@ export class AnthropicProvider {
         properties: { subtasks: { type: 'array', items: { type: 'string' } } },
       },
     );
-    return { subtasks: out.subtasks.slice(0, 8) };
+    const result: DecomposeOutput = { subtasks: out.subtasks.slice(0, 8) };
+    usageByOutput.set(result, usage);
+    return result;
   }
 
   async confirm(input: ConfirmInput): Promise<ConfirmOutput> {
     const tone = input.profile?.tone ?? 'neutral';
     const verbosity = input.profile?.verbosity ?? 'medium';
-    const out = await this.jsonCall<{ message: string }>(
+    const { data: out, usage } = await this.jsonCall<{ message: string }>(
       `Write a one-line plain-language confirmation for a task app. Tone: ${tone}. Verbosity: ${verbosity}. Never exceed 120 characters. No emoji unless tone is warm.`,
       JSON.stringify(input),
       {
@@ -133,13 +158,15 @@ export class AnthropicProvider {
       },
       256,
     );
-    return { message: out.message.slice(0, 160) };
+    const result: ConfirmOutput = { message: out.message.slice(0, 160) };
+    usageByOutput.set(result, usage);
+    return result;
   }
 
   async matchDone(input: MatchDoneInput): Promise<MatchDoneOutput> {
-    const out = await this.jsonCall<{ matchedId: string | null; candidates: string[] }>(
+    const { data: out, usage } = await this.jsonCall<{ matchedId: string | null; candidates: string[] }>(
       'The user spoke a completion utterance. Match it to exactly one of their open items. If confident, set matchedId. If ambiguous between a few, return their ids as candidates with matchedId null. If nothing matches, both empty/null.',
-      JSON.stringify(input),
+      JSON.stringify({ utterance: input.utterance, openItems: input.openItems }),
       {
         type: 'object',
         additionalProperties: false,
@@ -151,14 +178,16 @@ export class AnthropicProvider {
       },
     );
     const validIds = new Set(input.openItems.map((i) => i.id));
-    return {
+    const result: MatchDoneOutput = {
       matchedId: out.matchedId && validIds.has(out.matchedId) ? out.matchedId : null,
       candidates: out.candidates.filter((c) => validIds.has(c)).slice(0, 3),
     };
+    usageByOutput.set(result, usage);
+    return result;
   }
 
   async deriveProfile(input: DeriveProfileInput): Promise<DeriveProfileOutput> {
-    const out = await this.jsonCall<DeriveProfileOutput['attributes']>(
+    const { data: out, usage } = await this.jsonCall<DeriveProfileOutput['attributes']>(
       `Derive a small structured working-style profile from a user's assistant-chat messages and behavioral signals. Output ONLY structured attributes — never quote or paraphrase the conversations. vocabulary = up to 15 domain terms the user actually uses. schedulingRhythm hours are 0-23 local.`,
       JSON.stringify({
         // Cap the sample; raw imports never persist beyond this call.
@@ -186,6 +215,8 @@ export class AnthropicProvider {
       },
       2048,
     );
-    return { attributes: out };
+    const result: DeriveProfileOutput = { attributes: out };
+    usageByOutput.set(result, usage);
+    return result;
   }
 }

@@ -27,6 +27,7 @@ export function registerVoice(
     const open = rows.map(rowToItem);
 
     const match = await orchestrator.run('matchDone', {
+      userId: req.userId,
       utterance,
       openItems: open.map((i) => ({ id: i.id, title: i.title })),
     });

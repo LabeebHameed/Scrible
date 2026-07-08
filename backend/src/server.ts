@@ -13,6 +13,7 @@ import { registerCalendarRoutes } from './modules/calendarRoutes.js';
 import { registerExtension } from './modules/extension.js';
 import { registerProfile } from './modules/profile.js';
 import { registerAnalyticsRoutes } from './modules/analyticsRoutes.js';
+import { registerAiMetrics } from './modules/aiMetrics.js';
 import { AmplitudeSink, AnalyticsForwarder, type ProviderSink } from './analytics/forwarder.js';
 import { SyncEngine } from './modules/sync.js';
 import { buildOrchestrator } from './ai/index.js';
@@ -44,7 +45,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   const db = openDb(config.databasePath);
   const app = Fastify({ logger: false });
   const sync = new SyncEngine(db);
-  const orchestrator = buildOrchestrator(config);
+  const orchestrator = buildOrchestrator(config, db);
   const jobs = new JobQueue();
 
   // Calendar providers (build plan §7.1). Google/Outlook re-encrypt refreshed tokens.
@@ -128,6 +129,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   registerExtension(app, db, sync);
   registerProfile(app, db, sync, orchestrator);
   registerAnalyticsRoutes(app, db, analytics);
+  registerAiMetrics(app, orchestrator);
 
   return ctx;
 }

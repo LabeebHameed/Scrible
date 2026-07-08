@@ -55,7 +55,7 @@ test('revoking chat_import purges profile and import jobs', async () => {
     url: '/v1/consents/chat_import/revoke',
     headers: auth(token),
   });
-  assert.deepEqual(revoke.json().purged, { profiles: 1, import_jobs: 1 });
+  assert.deepEqual(revoke.json().purged, { profiles: 1, import_jobs: 1, learned_signals: 0 });
   assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM profiles').get()!.c, 0);
 });
 

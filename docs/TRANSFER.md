@@ -5,22 +5,28 @@ what exists, how it is structured, how to run and test it, the conventions to ke
 and the remaining pre-launch work. Read this first, then `docs/BUILD_PLAN.md`
 (the product spec) and `docs/decisions/0001-phase-0-tech-stack.md` (why the stack).
 
-Last updated at the end of **Phase 6** — all build-plan phases are implemented; §6 below lists the remaining pre-launch work (device QA, chaos/load drills, store submission).
+Last updated at the end of **Phase 8** — all build-plan phases are implemented, plus
+a post-launch context engine. §6 below lists the remaining pre-launch work (device
+QA, chaos/load drills, store submission).
 
 ---
 
 ## 1. TL;DR — current state
 
-- **All phases (0–6) are complete, tested, committed, and pushed.** What remains is
+- **All phases (0–8) are complete, tested, committed, and pushed.** What remains is
   pre-launch operational work: on-device QA, chaos/load drills, store submissions
   (see docs/launch-checklist.md).
-- **Two runnable packages** in an npm-workspaces monorepo: `backend/` (Fastify +
-  SQLite) and `app/` (Expo / React Native, runs on iOS, Android, and web). Plus a
-  build-less `extension/` (Chrome MV3).
+- **Phase 7** added a `desktop/` Tauri tray app (background app-launch watcher,
+  local-only matching). **Phase 8** added a context engine: the system learns from
+  the user's own corrections/edits over time — accuracy goes up, token usage goes
+  down, never up (see `docs/AI-MAP.md` and invariant #8 below).
+- **Four workspaces** in an npm-workspaces monorepo: `backend/` (Fastify + SQLite),
+  `app/` (Expo / React Native, runs on iOS, Android, and web), `desktop/` (Tauri 2
+  tray app), plus a build-less `extension/` (Chrome MV3, not an npm workspace).
 - **Everything works with no API keys and no cloud accounts.** Every AI capability
   has a deterministic heuristic fallback; the calendar has an in-process "internal"
   provider; notifications write to a DB outbox. Adding real providers is additive.
-- **Test status:** 58 backend tests + 4 app tests, all green. `npm run typecheck`
+- **Test status:** all backend, app, and desktop tests green. `npm run typecheck`
   and `npm test` are clean at the repo root.
 
 ```bash
@@ -45,7 +51,8 @@ npm run web -w app     # web client (also: expo start for native)
 | `docs/BUILD_PLAN.md` | The full product spec. Phase definitions and "done" criteria. |
 | `docs/decisions/0001-phase-0-tech-stack.md` | Stack decision record (ADR). |
 | `docs/data-classification.md` | Every field's sensitivity, retention, deletion path. Update when the schema changes. |
-| `.github/workflows/ci.yml` | CI: typecheck + tests on every push/PR. |
+| `docs/AI-MAP.md` | Where every AI capability fires, its provider chain, and its token profile — the context engine's design doc. |
+| `.github/workflows/ci.yml` | CI: typecheck + tests on every push/PR (+ `cargo test` for `desktop/watcher-core`). |
 
 ### Backend internals (`backend/src/`)
 
@@ -68,11 +75,14 @@ npm run web -w app     # web client (also: expo start for native)
 | `modules/calendarRoutes.ts` | Calendar links, OAuth start/complete, availability, schedule move/undo, activity feed, reminder snooze, provider webhooks. |
 | `modules/extension.ts` | Cross-device routing: `/v1/extension/checkin`, `/shown`. |
 | `modules/profile.ts` | Personalization: imports, profile transparency/edit/delete, `loadEffectiveProfile` (used by enrichment + scheduling). |
-| `ai/orchestrator.ts` | Provider chains with fallback + latency/cost instrumentation. **Logging policy: never logs payload text.** |
-| `ai/contracts.ts` | Versioned capability contracts (classify/decompose/confirm/matchDone/schedule/deriveProfile). |
-| `ai/providers/heuristic.ts` | Deterministic fallback for every capability (also powers tests). |
-| `ai/providers/anthropic.ts` | Claude via official SDK with structured outputs (`output_config.format`). |
-| `ai/index.ts` | Builds the orchestrator; Claude registered first when `ANTHROPIC_API_KEY` set, heuristic always last. |
+| `ai/orchestrator.ts` | Provider chains with fallback + latency/token instrumentation (`CallMetric.inputTokens/outputTokens`). **Logging policy: never logs payload text.** |
+| `ai/contracts.ts` | Versioned capability contracts (classify/decompose/confirm/matchDone/schedule/deriveProfile). `ClassifyInput`/`MatchDoneInput` carry an optional `userId` used only in code (learned provider) — never serialized into a Claude prompt. |
+| `ai/learning.ts` | Context engine (Phase 8): `learnFromCorrection`/`learnAppAlias` write to the capped `learned_signals` table from the user's own edits; `typePriors`/`appAliasFor`/`keyWeights` read it back; `prune` enforces the 200-row/user cap; `learnedVocabulary`/`learnedSummary` feed the profile. |
+| `ai/providers/learned.ts` | The zero-token provider: blends heuristics with learned priors; confident → answers instantly, else `throw new NotConfident()` to fall through exactly like any other provider failure. |
+| `ai/providers/heuristic.ts` | Deterministic fallback for every capability (also powers tests). Exports `contentTokens` (shared tokenizer used by `learning.ts`). |
+| `ai/providers/anthropic.ts` | Claude via official SDK with structured outputs (`output_config.format`). Token usage is attached to each returned output object via a `WeakMap` (`getUsage`) — race-free across concurrent requests, no shared mutable field. |
+| `ai/index.ts` | Builds the orchestrator: `learned` registered first for classify/matchDone (0 tokens when confident), then Claude when `ANTHROPIC_API_KEY` set, heuristic always last. |
+| `modules/aiMetrics.ts` | `GET /v1/ai/metrics` — per-capability call counts by provider + summed tokens, so "tokens go down as the learned provider's share rises" is measurable. |
 | `enrichment.ts` | Capture-path job: classify → decompose → summary. `afterEnrichment` hook fans into scheduling (server.ts). |
 | `calendar/` | `provider.ts` (interface + registry), `internal.ts` / `google.ts` / `outlook.ts` adapters, `service.ts` (sync engine, availability, auto-schedule, conflict cascade, undo, activity). |
 | `notifications/index.ts` | `NotificationDispatcher` (dedup, quiet hours) + `ReminderScheduler` (triggers, delivery, snooze, recurrence). Pluggable push senders; dev `OutboxSender` writes to `push_outbox`. |
@@ -112,6 +122,15 @@ npm run web -w app     # web client (also: expo start for native)
 7. **Desktop watcher privacy:** running-app/process names never leave the machine —
    the server serves app-triggered items (`/v1/desktop/checkin`) and the desktop app
    matches locally. Never add an endpoint that accepts process lists.
+8. **Learned context is applied in code, never appended to prompts.** `learned_signals`
+   (Phase 8) is read in `ai/providers/learned.ts` and used to short-circuit or refine
+   an answer in TypeScript — it is never interpolated into a Claude prompt string.
+   Every prompt input stays hard-capped regardless of table size (vocabulary ≤ 15
+   terms, recentTypes ≤ 5); a growing table can only make the `learned` provider's
+   share of calls rise (fewer tokens), never make any one call bigger. Learning is
+   consent-gated (`chat_import`, reused) and only ever taught by genuine user edits —
+   `serverUpdateItem` tags its own writes `origin: 'server'` so the system never
+   learns from its own guesses.
 
 ---
 
@@ -171,6 +190,20 @@ Feature flags: `FLAG_AUTO_CLASSIFY`, `FLAG_AUTO_SCHEDULE`, `FLAG_PERSONALIZATION
   (load tests, provider-outage chaos drills, runbooks, SLOs); launch readiness.
 - Much of this is test + hardening work against code that already exists; add
   `test/edge-cases.test.ts` and drive the named scenarios.
+
+### Phase 7 — Desktop companion — DONE: see `desktop/`, `desktop/README.md`
+- Tauri 2 tray app whose background watcher notices app launches and pops matching
+  items; process names are diffed and matched on-device only, gated behind the
+  `app_watcher` consent; classification extracts `appTrigger` from captures.
+
+### Phase 8 — Context engine — DONE: see `ai/learning.ts`, `ai/providers/learned.ts`, `modules/aiMetrics.ts`, `docs/AI-MAP.md`
+- Learning that grows awareness **without growing token usage** — token usage goes
+  down as it learns, never up. Corrections/edits accumulate as capped evidence in
+  `learned_signals`, applied purely in code; a new `learned` provider short-circuits
+  classify/matchDone at zero tokens when confident, otherwise falls through to
+  Claude via the existing fallback chain (no orchestrator core changes). `GET
+  /v1/ai/metrics` proves the token trend; `GET /v1/profile` surfaces learned
+  patterns in plain language.
 
 ### Known follow-ups / debts
 - Social sign-in (Apple/Google) endpoints are shaped but return 501 (need provider
