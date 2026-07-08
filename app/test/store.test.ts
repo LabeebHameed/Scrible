@@ -64,6 +64,7 @@ function fakeApi(): ApiClient & {
     async importChats() {
       return { profile: {} };
     },
+    async sendAnalytics() {},
   };
 }
 

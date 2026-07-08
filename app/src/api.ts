@@ -20,6 +20,7 @@ export interface ApiClient {
   patchProfile(edits: Record<string, unknown>): Promise<void>;
   deleteProfile(): Promise<{ confirmation: string }>;
   importChats(source: string, content: string): Promise<{ profile: Record<string, unknown> }>;
+  sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>): Promise<void>;
 }
 
 export interface ProfileView {
@@ -111,5 +112,8 @@ export class HttpApi implements ApiClient {
   }
   async importChats(source: string, content: string) {
     return this.req<{ profile: Record<string, unknown> }>('POST', '/v1/imports', { source, content });
+  }
+  async sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>) {
+    await this.req('POST', '/v1/analytics/events', { events });
   }
 }

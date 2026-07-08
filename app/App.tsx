@@ -9,6 +9,7 @@ import { CaptureScreen } from './src/screens/Capture';
 import { QueueScreen } from './src/screens/Queue';
 import { ActivityScreen } from './src/screens/Activity';
 import { SettingsScreen } from './src/screens/Settings';
+import { configureAnalytics, surface, track } from './src/analytics';
 import { colors } from './src/theme';
 
 const API_URL =
@@ -37,6 +38,13 @@ export default function App() {
         setToken(saved);
         await store.load();
         void store.sync();
+        void api
+          .getConsents()
+          .then((c) => {
+            configureAnalytics(api, c.analytics?.granted ?? false);
+            track('app.opened', { surface });
+          })
+          .catch(() => configureAnalytics(api, false));
       }
       setReady(true);
     })();

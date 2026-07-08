@@ -20,7 +20,11 @@ export const revocationHooks: Record<ConsentCategory, RevocationHook> = {
     profiles: Number(db.prepare('DELETE FROM profiles WHERE user_id = ?').run(userId).changes),
     import_jobs: Number(db.prepare('DELETE FROM import_jobs WHERE user_id = ?').run(userId).changes),
   }),
-  analytics: () => ({}), // gating is enforced at the forwarding layer (Phase 5)
+  // Revoking analytics erases the pseudonymous-id mapping: emission stops (the
+  // forwarding layer's consent gate) AND past events are permanently unlinked.
+  analytics: (db, userId) => ({
+    analytics_ids: Number(db.prepare('DELETE FROM analytics_ids WHERE user_id = ?').run(userId).changes),
+  }),
 };
 
 export function currentConsents(db: Db, userId: string): Record<string, unknown> {

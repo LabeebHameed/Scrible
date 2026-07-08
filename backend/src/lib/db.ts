@@ -194,6 +194,24 @@ CREATE TABLE IF NOT EXISTS changes (
 );
 CREATE INDEX IF NOT EXISTS idx_changes_user ON changes(user_id, seq);
 
+CREATE TABLE IF NOT EXISTS analytics_ids (
+  user_id TEXT PRIMARY KEY,
+  pseudo_id TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+
+-- Deliberately NO user_id column: events are keyed by pseudo_id only, so erasing
+-- the analytics_ids mapping permanently unlinks history from the account.
+CREATE TABLE IF NOT EXISTS analytics_events (
+  id TEXT PRIMARY KEY,
+  pseudo_id TEXT NOT NULL,
+  event TEXT NOT NULL,
+  props TEXT NOT NULL DEFAULT '{}',
+  schema_version TEXT NOT NULL,
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_events ON analytics_events(event, ts);
+
 CREATE TABLE IF NOT EXISTS processed_ops (
   op_id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -204,6 +222,7 @@ CREATE TABLE IF NOT EXISTS processed_ops (
 
 /** Tables holding per-user rows, in FK-safe deletion order (account deletion path). */
 export const USER_DATA_TABLES = [
+  'analytics_ids',
   'processed_ops',
   'changes',
   'audit_log',
@@ -228,6 +247,20 @@ export function openDb(path: string): Db {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(SCHEMA);
   return db;
+}
+
+/**
+ * DSR verification: proves no row referencing the user survives in any user-data
+ * table. Returns per-table residual counts (all zero after a correct deletion).
+ */
+export function verifyDeletion(db: Db, userId: string): Record<string, number> {
+  const residuals: Record<string, number> = {};
+  for (const table of USER_DATA_TABLES) {
+    const col = table === 'users' ? 'id' : 'user_id';
+    const row = db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`).get(userId) as { c: number };
+    residuals[table] = Number(row.c);
+  }
+  return residuals;
 }
 
 export function deleteAllUserData(db: Db, userId: string): Record<string, number> {

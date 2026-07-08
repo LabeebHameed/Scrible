@@ -54,5 +54,9 @@ heuristic fallback), `FLAG_*` feature flags.
   transparency UI with per-attribute edit that wins over derived values, adaptation
   into decomposition/confirmation/scheduling, on-device path, total deletion with a
   no-surviving-data test.
-- [ ] **Phase 5 — Analytics & compliance**: consent-gated event taxonomy, store compliance packages.
+- [x] **Phase 5 — Analytics & compliance**: versioned event taxonomy with no free-text
+  property kind (content cannot enter analytics by construction), consent-gated
+  forwarding layer under a random pseudonymous ID (revocation permanently unlinks
+  history), GDPR data export, audited DSR CLI with deletion verification, privacy
+  policy + iOS/Play/Chrome-Web-Store compliance packages.
 - [ ] **Phase 6 — Polish**: edge-case hardening, accessibility, launch readiness.

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { SyncStore } from '../store';
 import type { ApiClient } from '../api';
 import { isSpeechAvailable, startDictation, type DictationSession } from '../speech';
+import { surface, track } from '../analytics';
 import { colors } from '../theme';
 
 type Phase = 'idle' | 'recording' | 'saving';
@@ -48,6 +49,7 @@ export function CaptureScreen(props: { store: SyncStore; api: ApiClient }) {
       return;
     }
     const item = await props.store.capture(clean, source);
+    track('capture.completed', { surface, source });
     setLastItemId(item.id);
     setFeedback(`Got it — "${item.title}". Understanding it…`);
     setPhase('idle');

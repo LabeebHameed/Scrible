@@ -12,6 +12,8 @@ import { registerVoice } from './modules/voice.js';
 import { registerCalendarRoutes } from './modules/calendarRoutes.js';
 import { registerExtension } from './modules/extension.js';
 import { registerProfile } from './modules/profile.js';
+import { registerAnalyticsRoutes } from './modules/analyticsRoutes.js';
+import { AmplitudeSink, AnalyticsForwarder, type ProviderSink } from './analytics/forwarder.js';
 import { SyncEngine } from './modules/sync.js';
 import { buildOrchestrator } from './ai/index.js';
 import type { Orchestrator } from './ai/orchestrator.js';
@@ -34,6 +36,7 @@ export interface AppContext {
   reminders: ReminderScheduler;
   dispatcher: NotificationDispatcher;
   internalCalendar: InternalCalendarProvider;
+  analytics: AnalyticsForwarder;
 }
 
 export function buildApp(overrides?: Partial<Config>): AppContext {
@@ -62,6 +65,12 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   const dispatcher = new NotificationDispatcher(db, [new OutboxSender(db)]);
   const reminders = new ReminderScheduler(db, sync, dispatcher, orchestrator);
 
+  // Analytics forwarding layer (plan §10.1): consent-gated, taxonomy-enforced,
+  // pseudonymous. Provider sink only when configured; local store is the buffer.
+  const sinks: ProviderSink[] = [];
+  if (process.env.AMPLITUDE_API_KEY) sinks.push(new AmplitudeSink(process.env.AMPLITUDE_API_KEY));
+  const analytics = new AnalyticsForwarder(db, sinks);
+
   const ctx: AppContext = {
     app,
     db,
@@ -73,6 +82,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
     reminders,
     dispatcher,
     internalCalendar,
+    analytics,
   };
 
   // Scheduling path (plan §2.3): after an item is enriched, reminders get triggers
@@ -81,6 +91,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
     jobs.enqueue(async () => {
       const item = sync.itemById(userId, itemId);
       if (!item) return;
+      analytics.track(userId, 'item.created', { type: item.type, source: item.source, surface: 'web' });
       if (item.type === 'reminder' && item.timeIntent?.at) {
         reminders.ensureTrigger(userId, itemId, item.timeIntent.at, item.timeIntent.recurrence);
         const confirm = await orchestrator.run('confirm', {
@@ -116,6 +127,7 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   registerCalendarRoutes(app, db, calendar, reminders);
   registerExtension(app, db, sync);
   registerProfile(app, db, sync, orchestrator);
+  registerAnalyticsRoutes(app, db, analytics);
 
   return ctx;
 }

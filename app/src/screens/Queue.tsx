@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SyncStore } from '../store';
 import type { Item, ItemType } from '../types';
 import { colors, typeColor } from '../theme';
+import { surface, track } from '../analytics';
 
 const TYPES: ItemType[] = ['task', 'idea', 'reminder'];
 
@@ -37,8 +38,17 @@ function ItemCard(props: { item: Item; store: SyncStore }) {
       <View style={styles.cardRow}>
         <Pressable
           style={styles.check}
-          onPress={() => void store.complete(item.id)}
+          onPress={() => {
+            track('item.completed', {
+              type: item.type,
+              surface,
+              viaVoice: false,
+              timeToCompleteMs: Date.now() - item.createdAt,
+            });
+            void store.complete(item.id);
+          }}
           accessibilityLabel={`Complete ${item.title}`}
+          accessibilityRole="button"
         >
           <Text style={styles.checkText}>✓</Text>
         </Pressable>

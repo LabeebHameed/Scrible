@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { ApiClient, ProfileView } from '../api';
+import { setAnalyticsEnabled } from '../analytics';
 import type { SyncStore } from '../store';
 import { colors } from '../theme';
 
@@ -82,6 +83,7 @@ export function SettingsScreen(props: {
     try {
       if (next) await props.api.grantConsent(key);
       else await props.api.revokeConsent(key);
+      if (key === 'analytics') setAnalyticsEnabled(next);
       await refresh();
     } catch {
       setError('Could not update consent — are you online?');
