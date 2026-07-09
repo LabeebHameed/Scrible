@@ -1,8 +1,13 @@
-# AI map — where Scrible uses AI, and the context engine
+# AI map — where Scrible uses AI, and the context/automation engine
 
-Answers "where do we use AI" and documents the Phase 8 context engine: a system
-that grows more aware of the user's patterns the more it's used, **without ever
-increasing token usage** — usage goes down as it learns, never up.
+Answers "where do we use AI" and documents two things:
+- **Phase 8, the context engine**: learns from the user's own corrections, growing
+  more accurate the more it's used, **without ever increasing token usage**.
+- **Phase 9, free-tier-first automation**: heuristics are tried before any LLM, and
+  the primary LLM tier is a free-tier provider (NVIDIA NIM), with paid Anthropic
+  demoted to an optional, explicit opt-in. Net result: the app can run **indefinitely
+  at zero cost**, and even when a key is configured, it's consulted only for the
+  fraction of cases deterministic logic can't confidently resolve.
 
 ## The six capabilities
 
@@ -12,15 +17,52 @@ contract (`ai/contracts.ts`) and a provider chain with fallback (`ai/orchestrato
 
 | Capability | Fires when | Provider chain | Token profile |
 |---|---|---|---|
-| `classify` | Every new capture (voice or typed) | `learned → anthropic → heuristic` | **Falls to 0 tokens** once the learned provider is confident for a pattern; otherwise one Claude call (short prompt: transcript + localHour + recentTypes ≤ 5, no profile text beyond structured fields) |
-| `decompose` | Right after classify, same capture | `anthropic → heuristic` | One Claude call when configured (transcript + granularity preference) |
-| `confirm` | After capture, after scheduling, after completion, etc. | `anthropic → heuristic` | One small Claude call (≤256 tokens out) per event |
-| `matchDone` | Spoken/typed "done" utterance | `learned → anthropic → heuristic` | **Falls to 0 tokens** once the learned provider confidently matches; otherwise one Claude call (utterance + open item titles only) |
+| `classify` | Every new capture (voice or typed) | `learned → heuristic-confident → nvidia → anthropic (if key) → heuristic` | **0 tokens** whenever the learned provider or the heuristic's own confidence (explicit "remind me"/"idea" hints, etc.) is already strong; only the ambiguous remainder reaches an LLM |
+| `decompose` | Right after classify, same capture | `heuristic-confident → nvidia → anthropic (if key) → heuristic` | **0 tokens** when the item is confidently too small to split, or explicit connectors ("do X, then Y") already found the structure; only long implicit-structure text reaches an LLM |
+| `confirm` | After capture, after scheduling, after completion, etc. | `heuristic` only | **Always 0 tokens.** Fires on every event — the highest-frequency AI call in the app — so it never consults an LLM at all; templated messages already honor tone/verbosity from the profile |
+| `matchDone` | Spoken/typed "done" utterance | `learned → heuristic-confident → nvidia → anthropic (if key) → heuristic` | **0 tokens** once a learned alias or a strong single token-overlap match is confident; only genuine ambiguity reaches an LLM |
 | `schedule` | Auto-scheduling an idea/reminder | `heuristic` only | 0 tokens — deterministic constraint-solving over computed free/busy slots, not language understanding |
-| `deriveProfile` | Chat import, profile refresh | `anthropic → heuristic` | One Claude call, capped input (≤400 messages × 500 chars) |
+| `deriveProfile` | Chat import, profile refresh | `nvidia → anthropic (if key) → heuristic` | Rare (not per-capture); one free-tier call when configured, capped input (≤400 messages × 500 chars) |
 
 STT (speech-to-text) itself is on-device (`expo-speech-recognition` / Web Speech
 API) — zero tokens, never touches this layer.
+
+## Free-tier-first (Phase 9)
+
+**Problem:** the app must be usable indefinitely without ever costing money, and AI
+should be consulted for as small a slice of the work as possible — automation and
+deterministic heuristics first, real language understanding only where they
+genuinely can't resolve the case.
+
+**Two independent levers, both applied to every relevant chain above:**
+
+1. **Confidence gates ahead of any LLM** (`ai/providers/confident.ts`): thin wrappers
+   around the existing heuristics (`classifyHeuristic`, `decomposeHeuristic`,
+   `scoreOpenItems`) that return immediately when the heuristic's own signal is
+   already strong, and `throw new NotConfident()` otherwise — reusing the exact
+   fallback mechanics Phase 8's `learned` provider already established in
+   `ai/orchestrator.ts` (no orchestrator changes needed). This is the "automate
+   first" half: it applies regardless of which LLM (or none) is configured.
+2. **NVIDIA NIM as the primary LLM tier** (`ai/providers/openaiCompatible.ts`): a
+   generic OpenAI-compatible chat-completions client (works against NVIDIA NIM's
+   free-tier catalog — e.g. MiniMax M3 — or any compatible endpoint), registered
+   *before* Anthropic in every chain. `ANTHROPIC_API_KEY` becomes a fully optional,
+   paid, opt-in quality upgrade — not required for any capability. No SDK dependency:
+   built on Node's global `fetch`.
+
+With only `NVIDIA_API_KEY` set (no Anthropic key), the app runs at $0 forever. With
+neither key set, every capability still resolves via the deterministic heuristic
+tier — the product works out of the box, in tests, and offline. If the configured
+LLM tier is ever down, rate-limited, or returns malformed output, the provider simply
+throws and the chain falls through to the next tier — **never a hard failure**
+(`backend/test/ai-provider-chain.test.ts` covers this explicitly, including a stubbed
+NVIDIA failure falling through to heuristic).
+
+`confirm` is the one capability with no LLM tier at all: it fires on every single
+event (captured/scheduled/moved/conflict/reminder_set/completed), making it by far
+the highest-frequency AI call in the app, and the heuristic's templated messages
+already vary by tone/verbosity — dropping AI here was the single largest per-capture
+token cut available.
 
 ## The context engine (Phase 8)
 
@@ -68,16 +110,18 @@ only from a human correcting it.
 ### Proving it: `GET /v1/ai/metrics`
 
 Authenticated route exposing per-capability call counts by provider name (`learned`
-/ `anthropic` / `heuristic`) and summed `inputTokens`/`outputTokens` from Anthropic's
-own `response.usage`. Watch the `learned` share of `classify`/`matchDone` calls rise
-and the token sums grow slower than call volume (or fall, per-capture, as more
-corrections land) — this is the measurable proof of the design thesis, not an
-aspiration.
+/ `heuristic-confident` / `nvidia` / `anthropic` / `heuristic`) and summed
+`inputTokens`/`outputTokens` from each LLM's own usage response. Watch the combined
+`learned` + `heuristic-confident` share of calls rise and the token sums grow slower
+than call volume (or fall, per-capture, as more corrections land and more phrasing
+turns out to be confidently automatable) — this is the measurable proof of the
+design thesis, not an aspiration.
 
-Token capture itself is race-free: `ai/providers/anthropic.ts` attaches usage to
-each call's *specific returned output object* via a `WeakMap` (`getUsage`), keyed by
-object identity rather than a shared mutable field — safe under concurrent requests
-sharing one `AnthropicProvider` instance.
+Token capture itself is race-free: `ai/providers/usageTracker.ts` (`createUsageTracker`)
+attaches usage to each call's *specific returned output object* via a `WeakMap`,
+keyed by object identity rather than a shared mutable field — safe under concurrent
+requests sharing one provider instance. Both `ai/providers/anthropic.ts` and
+`ai/providers/openaiCompatible.ts` use this same shared tracker.
 
 ### Transparency & deletion
 

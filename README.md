@@ -28,9 +28,16 @@ npm test             # all packages
 npm run dev -w backend
 ```
 
-Environment: `PORT`, `DATABASE_PATH`, `JWT_SECRET` (required in production),
-`ANTHROPIC_API_KEY` (optional — without it every AI capability uses its deterministic
-heuristic fallback), `FLAG_*` feature flags.
+Environment: `PORT`, `DATABASE_PATH`, `JWT_SECRET` (required in production), `FLAG_*`
+feature flags. AI is free-tier-first and fully optional (docs/AI-MAP.md): without any
+key, every capability runs on deterministic heuristics — never fails, never costs
+anything. `NVIDIA_API_KEY` (optional) enables the primary free-tier LLM tier via
+NVIDIA NIM's OpenAI-compatible API for the genuinely ambiguous cases heuristics can't
+confidently resolve; `NVIDIA_MODEL` (default `minimaxai/minimax-m3` — confirm the
+exact catalog slug for your NVIDIA account and override if different) and
+`NVIDIA_BASE_URL` (default `https://integrate.api.nvidia.com/v1`) are configurable.
+`ANTHROPIC_API_KEY` (optional) is a secondary, paid, opt-in quality upgrade tried
+only after the free tier — not required for any AI capability.
 
 ## Build phases
 

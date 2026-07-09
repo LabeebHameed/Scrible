@@ -158,13 +158,19 @@ export function cleanTitle(text: string): string {
   return t.replace(/[.!]+$/, '');
 }
 
+/** Shared with the confidence gate (providers/confident.ts) so both agree on "too small to split". */
+export function decomposeTooSmall(input: DecomposeInput): boolean {
+  const words = input.text.trim().split(/\s+/).length;
+  const granularity = input.profile?.decompositionGranularity ?? 'medium';
+  const minWords = granularity === 'fine' ? 6 : granularity === 'coarse' ? 14 : 9;
+  return words < minWords || input.type === 'reminder';
+}
+
 export function decomposeHeuristic(input: DecomposeInput): DecomposeOutput {
   const text = input.text.trim();
   // Product rule: small items get no decomposition — don't manufacture busywork.
-  const words = text.split(/\s+/).length;
   const granularity = input.profile?.decompositionGranularity ?? 'medium';
-  const minWords = granularity === 'fine' ? 6 : granularity === 'coarse' ? 14 : 9;
-  if (words < minWords || input.type === 'reminder') return { subtasks: [] };
+  if (decomposeTooSmall(input)) return { subtasks: [] };
   const parts = text
     .split(/(?:,|;| and then | then | and also | after that |\band\b)/i)
     .map((p) => p.trim())
@@ -208,9 +214,10 @@ export function confirmHeuristic(input: ConfirmInput): ConfirmOutput {
 
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
-export function matchDoneHeuristic(input: MatchDoneInput): MatchDoneOutput {
+/** Shared with the confidence gate (providers/confident.ts) so scoring never diverges. */
+export function scoreOpenItems(input: MatchDoneInput): Array<{ id: string; score: number }> {
   const utter = tokenize(input.utterance.replace(/\b(done with|done|finished|completed?|mark|i)\b/gi, ' '));
-  let best: Array<{ id: string; score: number }> = input.openItems
+  return input.openItems
     .map((it) => {
       const titleTokens = tokenize(it.title);
       const overlap = titleTokens.filter((tok) => utter.includes(tok)).length;
@@ -218,6 +225,10 @@ export function matchDoneHeuristic(input: MatchDoneInput): MatchDoneOutput {
     })
     .filter((s) => s.score > 0.3)
     .sort((a, b) => b.score - a.score);
+}
+
+export function matchDoneHeuristic(input: MatchDoneInput): MatchDoneOutput {
+  const best = scoreOpenItems(input);
   if (best.length === 0) return { matchedId: null, candidates: [] };
   if (best.length > 1 && best[1]!.score >= best[0]!.score * 0.8) {
     return { matchedId: null, candidates: best.slice(0, 3).map((b) => b.id) };

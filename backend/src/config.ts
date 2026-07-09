@@ -3,6 +3,10 @@ export interface Config {
   databasePath: string;
   jwtSecret: string;
   anthropicApiKey: string | undefined;
+  /** Free-tier-first primary LLM (Phase 9): NVIDIA NIM or any OpenAI-compatible endpoint. */
+  nvidiaApiKey: string | undefined;
+  nvidiaModel: string;
+  nvidiaBaseUrl: string;
   /** Feature flags for gradual phase rollout (build plan §5.7). */
   flags: {
     autoClassify: boolean;
@@ -25,6 +29,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     databasePath: env.DATABASE_PATH ?? 'scrible.db',
     jwtSecret,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
+    nvidiaApiKey: env.NVIDIA_API_KEY,
+    nvidiaModel: env.NVIDIA_MODEL ?? 'minimaxai/minimax-m3',
+    nvidiaBaseUrl: env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
     flags: {
       autoClassify: env.FLAG_AUTO_CLASSIFY !== '0',
       autoSchedule: env.FLAG_AUTO_SCHEDULE !== '0',

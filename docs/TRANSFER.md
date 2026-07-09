@@ -5,27 +5,32 @@ what exists, how it is structured, how to run and test it, the conventions to ke
 and the remaining pre-launch work. Read this first, then `docs/BUILD_PLAN.md`
 (the product spec) and `docs/decisions/0001-phase-0-tech-stack.md` (why the stack).
 
-Last updated at the end of **Phase 8** — all build-plan phases are implemented, plus
-a post-launch context engine. §6 below lists the remaining pre-launch work (device
-QA, chaos/load drills, store submission).
+Last updated at the end of **Phase 9** — all build-plan phases are implemented, plus
+a post-launch context engine and free-tier-first automation layer. §6 below lists
+the remaining pre-launch work (device QA, chaos/load drills, store submission).
 
 ---
 
 ## 1. TL;DR — current state
 
-- **All phases (0–8) are complete, tested, committed, and pushed.** What remains is
+- **All phases (0–9) are complete, tested, committed, and pushed.** What remains is
   pre-launch operational work: on-device QA, chaos/load drills, store submissions
   (see docs/launch-checklist.md).
 - **Phase 7** added a `desktop/` Tauri tray app (background app-launch watcher,
   local-only matching). **Phase 8** added a context engine: the system learns from
   the user's own corrections/edits over time — accuracy goes up, token usage goes
-  down, never up (see `docs/AI-MAP.md` and invariant #8 below).
+  down, never up. **Phase 9** made AI free-tier-first: deterministic heuristics are
+  tried before any LLM tier, and the primary LLM is a free NVIDIA NIM-hosted model,
+  with paid Anthropic demoted to an optional opt-in (see `docs/AI-MAP.md` and
+  invariants #8–#9 below).
 - **Four workspaces** in an npm-workspaces monorepo: `backend/` (Fastify + SQLite),
   `app/` (Expo / React Native, runs on iOS, Android, and web), `desktop/` (Tauri 2
   tray app), plus a build-less `extension/` (Chrome MV3, not an npm workspace).
-- **Everything works with no API keys and no cloud accounts.** Every AI capability
-  has a deterministic heuristic fallback; the calendar has an in-process "internal"
-  provider; notifications write to a DB outbox. Adding real providers is additive.
+- **Everything works with no API keys and no cloud accounts, and can run
+  indefinitely at zero cost even with keys configured.** Every AI capability has a
+  deterministic heuristic fallback tried before any LLM; the calendar has an
+  in-process "internal" provider; notifications write to a DB outbox. Adding real
+  providers is additive.
 - **Test status:** all backend, app, and desktop tests green. `npm run typecheck`
   and `npm test` are clean at the repo root.
 
@@ -78,10 +83,14 @@ npm run web -w app     # web client (also: expo start for native)
 | `ai/orchestrator.ts` | Provider chains with fallback + latency/token instrumentation (`CallMetric.inputTokens/outputTokens`). **Logging policy: never logs payload text.** |
 | `ai/contracts.ts` | Versioned capability contracts (classify/decompose/confirm/matchDone/schedule/deriveProfile). `ClassifyInput`/`MatchDoneInput` carry an optional `userId` used only in code (learned provider) — never serialized into a Claude prompt. |
 | `ai/learning.ts` | Context engine (Phase 8): `learnFromCorrection`/`learnAppAlias` write to the capped `learned_signals` table from the user's own edits; `typePriors`/`appAliasFor`/`keyWeights` read it back; `prune` enforces the 200-row/user cap; `learnedVocabulary`/`learnedSummary` feed the profile. |
-| `ai/providers/learned.ts` | The zero-token provider: blends heuristics with learned priors; confident → answers instantly, else `throw new NotConfident()` to fall through exactly like any other provider failure. |
-| `ai/providers/heuristic.ts` | Deterministic fallback for every capability (also powers tests). Exports `contentTokens` (shared tokenizer used by `learning.ts`). |
-| `ai/providers/anthropic.ts` | Claude via official SDK with structured outputs (`output_config.format`). Token usage is attached to each returned output object via a `WeakMap` (`getUsage`) — race-free across concurrent requests, no shared mutable field. |
-| `ai/index.ts` | Builds the orchestrator: `learned` registered first for classify/matchDone (0 tokens when confident), then Claude when `ANTHROPIC_API_KEY` set, heuristic always last. |
+| `ai/providers/learned.ts` | The zero-token provider: blends heuristics with learned priors; confident → answers instantly, else `throw new NotConfident()` to fall through exactly like any other provider failure. Also exports `NotConfident`, reused by `providers/confident.ts`. |
+| `ai/providers/heuristic.ts` | Deterministic fallback for every capability (also powers tests). Exports `contentTokens` (shared tokenizer), `decomposeTooSmall`, and `scoreOpenItems` — shared with `providers/confident.ts` so the confidence gates never diverge from the base heuristic's own logic. |
+| `ai/providers/confident.ts` | Phase 9: confidence gates (`classifyConfident`/`decomposeConfident`/`matchDoneConfident`) that return a heuristic result only when its own signal is already strong, else `throw new NotConfident()` — the "automate first" half of free-tier-first AI. |
+| `ai/providers/prompts.ts` | Shared system-prompt strings used by both `anthropic.ts` and `openaiCompatible.ts` so wording never drifts between providers. |
+| `ai/providers/usageTracker.ts` | Shared race-free token-accounting helper (`createUsageTracker`) — usage attached to the exact output object a call returns, via `WeakMap`. Used by both `anthropic.ts` and `openaiCompatible.ts`. |
+| `ai/providers/anthropic.ts` | Claude via official SDK with structured outputs (`output_config.format`). Optional, paid, opt-in only — registered after the free tier. |
+| `ai/providers/openaiCompatible.ts` | Phase 9: generic OpenAI-compatible chat-completions client (global `fetch`, no SDK) — the free-tier-first primary LLM tier, targeting NVIDIA NIM by default. |
+| `ai/index.ts` | Builds the orchestrator (Phase 9 chain order): `learned` → `heuristic-confident` → `nvidia` (if `NVIDIA_API_KEY`) → `anthropic` (if `ANTHROPIC_API_KEY`) → `heuristic`. `confirm` skips both AI tiers entirely. |
 | `modules/aiMetrics.ts` | `GET /v1/ai/metrics` — per-capability call counts by provider + summed tokens, so "tokens go down as the learned provider's share rises" is measurable. |
 | `enrichment.ts` | Capture-path job: classify → decompose → summary. `afterEnrichment` hook fans into scheduling (server.ts). |
 | `calendar/` | `provider.ts` (interface + registry), `internal.ts` / `google.ts` / `outlook.ts` adapters, `service.ts` (sync engine, availability, auto-schedule, conflict cascade, undo, activity). |
@@ -131,6 +140,14 @@ npm run web -w app     # web client (also: expo start for native)
    consent-gated (`chat_import`, reused) and only ever taught by genuine user edits —
    `serverUpdateItem` tags its own writes `origin: 'server'` so the system never
    learns from its own guesses.
+9. **AI is free-tier-first and automate-first (Phase 9).** Every capability tries
+   deterministic heuristics (and learned priors) before any LLM; the first LLM tier
+   tried is always the free-tier `nvidia` provider, never the paid `anthropic` one.
+   `ANTHROPIC_API_KEY` is a fully optional, explicit opt-in — never required. Any
+   provider failure (missing key, network error, malformed output) just throws and
+   falls through to the next tier, down to the always-succeeding heuristic — the app
+   must never hard-fail and must never cost money by default. `confirm` has no LLM
+   tier at all (see `ai/index.ts`).
 
 ---
 
@@ -138,7 +155,8 @@ npm run web -w app     # web client (also: expo start for native)
 
 | Capability | Env vars | Without them |
 |---|---|---|
-| Claude LLM | `ANTHROPIC_API_KEY` (opt `ANTHROPIC_MODEL`, default `claude-opus-4-8`) | Heuristic providers (works, lower quality). |
+| Free-tier LLM (primary) | `NVIDIA_API_KEY` (opt `NVIDIA_MODEL`, default `minimaxai/minimax-m3`; opt `NVIDIA_BASE_URL`, default `https://integrate.api.nvidia.com/v1`) | Heuristic/learned providers only (works; this is the default). |
+| Claude LLM (optional paid upgrade) | `ANTHROPIC_API_KEY` (opt `ANTHROPIC_MODEL`, default `claude-opus-4-8`) | Tried only after the free tier; without it, never consulted at all. |
 | Google Calendar | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth routes return 501; use the `internal` provider. |
 | Outlook Calendar | `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | Same. |
 | Push (APNs/FCM) | wire real `PushSender`s in `server.ts` | `OutboxSender` records to `push_outbox`. |
@@ -204,6 +222,16 @@ Feature flags: `FLAG_AUTO_CLASSIFY`, `FLAG_AUTO_SCHEDULE`, `FLAG_PERSONALIZATION
   Claude via the existing fallback chain (no orchestrator core changes). `GET
   /v1/ai/metrics` proves the token trend; `GET /v1/profile` surfaces learned
   patterns in plain language.
+
+### Phase 9 — Free-tier-first AI — DONE: see `ai/providers/confident.ts`, `ai/providers/openaiCompatible.ts`, `ai/index.ts`, `docs/AI-MAP.md`
+- Two changes, same goal — the app must run indefinitely without ever costing
+  anything: (1) confidence gates (`providers/confident.ts`) let a strong heuristic
+  signal answer directly at 0 tokens, same `NotConfident` fallthrough pattern as
+  Phase 8's `learned` provider; (2) a free-tier NVIDIA NIM (OpenAI-compatible)
+  provider is now the primary LLM tier, with Anthropic demoted to an optional paid
+  opt-in tried only after it. `confirm` — the highest-frequency AI call in the app —
+  dropped its LLM tier entirely. Any provider failure still falls through to the
+  always-succeeding heuristic tier; nothing can hard-fail.
 
 ### Known follow-ups / debts
 - Social sign-in (Apple/Google) endpoints are shaped but return 501 (need provider

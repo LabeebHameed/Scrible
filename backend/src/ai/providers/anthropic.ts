@@ -20,23 +20,15 @@ import type {
   MatchDoneOutput,
 } from '../contracts.js';
 import { parseTimeIntent, cleanTitle } from './heuristic.js';
+import { classifyPrompt, decomposePrompt, confirmPrompt, MATCH_DONE_PROMPT, DERIVE_PROFILE_PROMPT } from './prompts.js';
+import { createUsageTracker, type TokenUsage } from './usageTracker.js';
 
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-opus-4-8';
 
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-}
+export type { TokenUsage };
 
-/**
- * Token accounting side-channel (Phase 8): keyed by the exact output object each
- * public method returns, so concurrent calls can never cross-contaminate usage —
- * no shared mutable field, no race. Read via getUsage() right after a call resolves.
- */
-const usageByOutput = new WeakMap<object, TokenUsage>();
-export function getUsage(output: object): TokenUsage | undefined {
-  return usageByOutput.get(output);
-}
+const tracker = createUsageTracker();
+export const getUsage = tracker.get;
 
 export class AnthropicProvider {
   private client: Anthropic;
@@ -83,7 +75,7 @@ export class AnthropicProvider {
       computerAction: boolean;
       appTrigger: string | null;
     }>(
-      `You classify a voice-captured note into exactly one of: task (something to do), idea (a thought/concept to develop later), reminder (time-bound nudge). Extract any explicit time expression. Flag when the item requires being at a computer/browser (posting online, email, publishing, coding). If the item should surface when a specific desktop application is opened ("when I open Photoshop…"), extract that application's name (lowercase) as appTrigger; otherwise null. Current local time: ${new Date().toISOString()} in timezone ${input.context.timezone}. Resolve relative times against that. Produce a short cleaned title (max 60 chars) without filler like "remind me to".`,
+      classifyPrompt(input.context.timezone),
       JSON.stringify({ transcript: input.text, localHour: input.context.localHour, recentTypes: input.context.recentTypes }),
       {
         type: 'object',
@@ -123,14 +115,13 @@ export class AnthropicProvider {
       contextTag: out.computerAction || out.appTrigger ? 'computer-action' : null,
       appTrigger: out.appTrigger ? out.appTrigger.toLowerCase().slice(0, 40) : null,
     };
-    usageByOutput.set(result, usage);
+    tracker.set(result, usage);
     return result;
   }
 
   async decompose(input: DecomposeInput): Promise<DecomposeOutput> {
-    const granularity = input.profile?.decompositionGranularity ?? 'medium';
     const { data: out, usage } = await this.jsonCall<{ subtasks: string[] }>(
-      `You break a captured ${input.type} into concrete, ordered sub-tasks. Rules: if the item is small enough to do in one sitting, return an empty list — never manufacture busywork. Granularity preference: ${granularity} (coarse = 2-3 large steps, medium = up to 5, fine = up to 8 small steps). Each sub-task is a short imperative phrase.`,
+      decomposePrompt(input),
       JSON.stringify({ text: input.text }),
       {
         type: 'object',
@@ -140,15 +131,13 @@ export class AnthropicProvider {
       },
     );
     const result: DecomposeOutput = { subtasks: out.subtasks.slice(0, 8) };
-    usageByOutput.set(result, usage);
+    tracker.set(result, usage);
     return result;
   }
 
   async confirm(input: ConfirmInput): Promise<ConfirmOutput> {
-    const tone = input.profile?.tone ?? 'neutral';
-    const verbosity = input.profile?.verbosity ?? 'medium';
     const { data: out, usage } = await this.jsonCall<{ message: string }>(
-      `Write a one-line plain-language confirmation for a task app. Tone: ${tone}. Verbosity: ${verbosity}. Never exceed 120 characters. No emoji unless tone is warm.`,
+      confirmPrompt(input),
       JSON.stringify(input),
       {
         type: 'object',
@@ -159,13 +148,13 @@ export class AnthropicProvider {
       256,
     );
     const result: ConfirmOutput = { message: out.message.slice(0, 160) };
-    usageByOutput.set(result, usage);
+    tracker.set(result, usage);
     return result;
   }
 
   async matchDone(input: MatchDoneInput): Promise<MatchDoneOutput> {
     const { data: out, usage } = await this.jsonCall<{ matchedId: string | null; candidates: string[] }>(
-      'The user spoke a completion utterance. Match it to exactly one of their open items. If confident, set matchedId. If ambiguous between a few, return their ids as candidates with matchedId null. If nothing matches, both empty/null.',
+      MATCH_DONE_PROMPT,
       JSON.stringify({ utterance: input.utterance, openItems: input.openItems }),
       {
         type: 'object',
@@ -182,13 +171,13 @@ export class AnthropicProvider {
       matchedId: out.matchedId && validIds.has(out.matchedId) ? out.matchedId : null,
       candidates: out.candidates.filter((c) => validIds.has(c)).slice(0, 3),
     };
-    usageByOutput.set(result, usage);
+    tracker.set(result, usage);
     return result;
   }
 
   async deriveProfile(input: DeriveProfileInput): Promise<DeriveProfileOutput> {
     const { data: out, usage } = await this.jsonCall<DeriveProfileOutput['attributes']>(
-      `Derive a small structured working-style profile from a user's assistant-chat messages and behavioral signals. Output ONLY structured attributes — never quote or paraphrase the conversations. vocabulary = up to 15 domain terms the user actually uses. schedulingRhythm hours are 0-23 local.`,
+      DERIVE_PROFILE_PROMPT,
       JSON.stringify({
         // Cap the sample; raw imports never persist beyond this call.
         userMessages: input.userMessages.slice(0, 400).map((m) => m.slice(0, 500)),
@@ -216,7 +205,7 @@ export class AnthropicProvider {
       2048,
     );
     const result: DeriveProfileOutput = { attributes: out };
-    usageByOutput.set(result, usage);
+    tracker.set(result, usage);
     return result;
   }
 }
