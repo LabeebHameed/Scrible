@@ -33,7 +33,8 @@
           "microphonePermission": "Scrible uses the microphone so you can capture tasks, ideas, and reminders by speaking.",
           "speechRecognitionPermission": "Scrible transcribes your voice on this device to create tasks, ideas, and reminders."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

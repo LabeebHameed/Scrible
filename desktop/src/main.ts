@@ -6,6 +6,9 @@
 import { DesktopApi } from './api';
 import { matchingItems, type TriggerItem } from './matcher';
 
+/** Reminder id → the `deliveredAt` value we last notified for (dedup across polls). */
+const notifiedReminders = new Map<string, number>();
+
 // Tauri APIs are absent when the frontend runs in a plain browser (vite dev).
 const inTauri = '__TAURI_INTERNALS__' in globalThis;
 
@@ -78,20 +81,44 @@ async function setWatcher(enabled: boolean): Promise<void> {
   await invoke('set_watcher_enabled', { enabled });
 }
 
-async function notifyMatches(appName: string, matches: TriggerItem[]): Promise<void> {
-  if (!inTauri || matches.length === 0) return;
+async function showNotification(title: string, body: string): Promise<void> {
+  if (!inTauri) return;
   const { isPermissionGranted, requestPermission, sendNotification } = await import(
     '@tauri-apps/plugin-notification'
   );
   let granted = await isPermissionGranted();
   if (!granted) granted = (await requestPermission()) === 'granted';
   if (!granted) return;
+  sendNotification({ title, body });
+}
+
+async function notifyMatches(appName: string, matches: TriggerItem[]): Promise<void> {
+  if (matches.length === 0) return;
   const first = matches[0]!;
   const more = matches.length > 1 ? ` (+${matches.length - 1} more)` : '';
-  sendNotification({
-    title: `While you're in ${appName}`,
-    body: `${first.title}${more}`,
-  });
+  await showNotification(`While you're in ${appName}`, `${first.title}${more}`);
+}
+
+/**
+ * Poll due reminders and notify for any the backend has (re-)delivered since we
+ * last showed it — the backend's ReminderScheduler already owns the re-nag cadence
+ * (every 5 min, up to 2h) and the "seen" gate; this just mirrors it locally,
+ * deduped on `deliveredAt` so a 30s poll doesn't re-notify every cycle.
+ */
+async function checkReminders(): Promise<void> {
+  if (!state.token) return;
+  try {
+    const due = await api.reminders();
+    const now = Date.now();
+    for (const r of due) {
+      if (r.seenAt || r.fireAt > now || r.deliveredAt == null) continue;
+      if (notifiedReminders.get(r.id) === r.deliveredAt) continue;
+      notifiedReminders.set(r.id, r.deliveredAt);
+      await showNotification('Scrible reminder', r.title);
+    }
+  } catch {
+    /* offline — retry next poll */
+  }
 }
 
 async function onAppOpened(appName: string): Promise<void> {
@@ -252,6 +279,7 @@ void (async () => {
   setInterval(() => {
     if (!state.token) return;
     void drainChanges();
+    void checkReminders();
     // Re-check consent so a revoke from the phone stops the watcher within a minute.
     void api
       .watcherConsent()

@@ -211,15 +211,21 @@ export function registerCalendarRoutes(
 
   app.get('/v1/reminders', { preHandler: app.authenticate }, async (req) => {
     const rows = (await db
-      .prepare('SELECT * FROM reminder_triggers WHERE user_id = ? ORDER BY fire_at LIMIT 100')
+      .prepare(
+        `SELECT rt.*, i.title FROM reminder_triggers rt
+         JOIN items i ON i.id = rt.item_id
+         WHERE rt.user_id = ? ORDER BY rt.fire_at LIMIT 100`,
+      )
       .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       itemId: r.item_id,
+      title: r.title,
       fireAt: r.fire_at,
       recurrence: r.recurrence,
       snoozedUntil: r.snoozed_until,
       deliveredAt: r.delivered_at,
+      seenAt: r.seen_at,
     }));
   });
 
@@ -227,6 +233,13 @@ export function registerCalendarRoutes(
     const { id } = req.params as { id: string };
     const { minutes } = (req.body ?? {}) as { minutes?: number };
     const ok = await reminders.snooze(req.userId, id, Math.max(1, Math.min(minutes ?? 30, 24 * 60)));
+    return ok ? { ok: true } : reply.code(404).send({ error: 'not found' });
+  });
+
+  /** Acknowledge a reminder (notification tapped) — stops further re-nagging. */
+  app.post('/v1/reminders/:id/seen', { preHandler: app.authenticate }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const ok = await reminders.markSeen(req.userId, id);
     return ok ? { ok: true } : reply.code(404).send({ error: 'not found' });
   });
 }

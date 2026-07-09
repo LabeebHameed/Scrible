@@ -25,6 +25,7 @@ import { GoogleCalendarProvider } from './calendar/google.js';
 import { OutlookCalendarProvider } from './calendar/outlook.js';
 import { CalendarService } from './calendar/service.js';
 import { NotificationDispatcher, OutboxSender, ReminderScheduler } from './notifications/index.js';
+import { ExpoPushSender } from './notifications/expoPush.js';
 
 export interface AppContext {
   app: FastifyInstance;
@@ -70,7 +71,7 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
   registry.register(outlook);
 
   const calendar = new CalendarService(db, sync, orchestrator, registry);
-  const dispatcher = new NotificationDispatcher(db, [new OutboxSender(db)]);
+  const dispatcher = new NotificationDispatcher(db, [new OutboxSender(db), new ExpoPushSender()]);
   const reminders = new ReminderScheduler(db, sync, dispatcher, orchestrator);
 
   // Analytics forwarding layer (plan §10.1): consent-gated, taxonomy-enforced,

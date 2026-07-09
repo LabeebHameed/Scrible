@@ -21,6 +21,8 @@ export interface ApiClient {
   deleteProfile(): Promise<{ confirmation: string }>;
   importChats(source: string, content: string): Promise<{ profile: Record<string, unknown> }>;
   sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>): Promise<void>;
+  registerDevice(platform: string, pushToken: string): Promise<void>;
+  markReminderSeen(reminderId: string): Promise<void>;
 }
 
 export interface ProfileView {
@@ -115,5 +117,11 @@ export class HttpApi implements ApiClient {
   }
   async sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>) {
     await this.req('POST', '/v1/analytics/events', { events });
+  }
+  async registerDevice(platform: string, pushToken: string) {
+    await this.req('POST', '/v1/devices', { platform, pushToken });
+  }
+  async markReminderSeen(reminderId: string) {
+    await this.req('POST', `/v1/reminders/${reminderId}/seen`);
   }
 }

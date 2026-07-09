@@ -65,6 +65,8 @@ function fakeApi(): ApiClient & {
       return { profile: {} };
     },
     async sendAnalytics() {},
+    async registerDevice() {},
+    async markReminderSeen() {},
   };
 }
 

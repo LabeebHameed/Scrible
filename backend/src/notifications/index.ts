@@ -1,9 +1,13 @@
 /**
  * Notification dispatch + server-side reminder scheduling (build plan §7.5).
  * One module owns delivery, dedup, and quiet hours so a reminder never fires twice
- * across channels. Push senders are pluggable: APNs/FCM in production (credentials
- * via env), a dev sender that records to push_outbox otherwise — the outbox also
+ * across channels. Push senders are pluggable: real delivery (Expo push — see
+ * expoPush.ts) plus a dev sender that records to push_outbox — the outbox also
  * powers delivery assertions in tests and the extension's pull channel (Phase 3).
+ *
+ * Escalation (peak-assistant standard): an unacknowledged reminder re-nags every
+ * RENAG_INTERVAL_MS until RENAG_CAP_MS after its due time, or until it's seen
+ * (tapped, completed, or snoozed) — see ReminderScheduler.tick().
  */
 import { randomUUID } from 'node:crypto';
 import type { Db } from '../lib/db.js';
@@ -14,7 +18,7 @@ export interface PushSender {
   /** e.g. 'apns' | 'fcm' | 'outbox' */
   channel: string;
   supports(platform: string): boolean;
-  send(deviceToken: string | null, title: string, body: string): Promise<void>;
+  send(deviceToken: string | null, title: string, body: string, data?: Record<string, unknown>): Promise<void>;
 }
 
 /** Dev/test sender — delivery is observable in the push_outbox table. */
@@ -44,7 +48,7 @@ export class NotificationDispatcher {
     dedupKey: string,
     title: string,
     body: string,
-    opts: { respectQuietHours?: boolean } = {},
+    opts: { respectQuietHours?: boolean; data?: Record<string, unknown> } = {},
   ): Promise<boolean> {
     const seen = await this.db
       .prepare('SELECT id FROM push_outbox WHERE user_id = ? AND dedup_key = ? LIMIT 1')
@@ -69,7 +73,7 @@ export class NotificationDispatcher {
         .run(randomUUID(), userId, String(device.id), channel, title, body, dedupKey, Date.now());
       if (sender && sender.channel !== 'outbox') {
         try {
-          await sender.send(device.push_token as string | null, title, body);
+          await sender.send(device.push_token as string | null, title, body, opts.data);
         } catch {
           /* provider failure — outbox row stands as the retry record */
         }
@@ -91,6 +95,11 @@ export class NotificationDispatcher {
     return start <= end ? h >= start && h < end : h >= start || h < end;
   }
 }
+
+/** Re-nag cadence for an unacknowledged reminder — the "won't let it go" behavior. */
+const RENAG_INTERVAL_MS = 5 * 60_000;
+/** Stop escalating this long after the original due time; item stays overdue in the queue. */
+const RENAG_CAP_MS = 2 * 3600_000;
 
 export class ReminderScheduler {
   private timer: NodeJS.Timeout | null = null;
@@ -119,7 +128,7 @@ export class ReminderScheduler {
     if (existing) {
       await this.db
         .prepare(
-          'UPDATE reminder_triggers SET fire_at = ?, recurrence = ?, delivered_at = NULL, updated_at = ? WHERE id = ?',
+          'UPDATE reminder_triggers SET fire_at = ?, recurrence = ?, delivered_at = NULL, seen_at = NULL, updated_at = ? WHERE id = ?',
         )
         .run(fireAt, recurrence ?? null, now, existing.id);
       return;
@@ -139,26 +148,44 @@ export class ReminderScheduler {
     const until = Date.now() + minutes * 60_000;
     // Snooze re-arms delivery and syncs across devices via the change feed.
     await this.db
-      .prepare('UPDATE reminder_triggers SET snoozed_until = ?, fire_at = ?, delivered_at = NULL, updated_at = ? WHERE id = ?')
+      .prepare(
+        'UPDATE reminder_triggers SET snoozed_until = ?, fire_at = ?, delivered_at = NULL, seen_at = NULL, updated_at = ? WHERE id = ?',
+      )
       .run(until, until, Date.now(), triggerId);
     return true;
   }
 
-  /** Deliver every due, undelivered trigger. Called on an interval; test-callable. */
+  /** Acknowledge a trigger (notification tapped) — stops further re-nagging. */
+  async markSeen(userId: string, triggerId: string): Promise<boolean> {
+    const res = await this.db
+      .prepare('UPDATE reminder_triggers SET seen_at = ? WHERE id = ? AND user_id = ?')
+      .run(Date.now(), triggerId, userId);
+    return res.changes > 0;
+  }
+
+  /**
+   * Deliver every due, unacknowledged trigger — re-nagging every RENAG_INTERVAL_MS
+   * until RENAG_CAP_MS after the due time, or until seen (tapped/completed/snoozed).
+   * Called on an interval; test-callable.
+   */
   async tick(now = Date.now()): Promise<number> {
     const due = (await this.db
       .prepare(
         `SELECT rt.*, i.title, i.type, i.status FROM reminder_triggers rt
          JOIN items i ON i.id = rt.item_id
-         WHERE rt.fire_at <= ? AND rt.delivered_at IS NULL`,
+         WHERE rt.fire_at <= ? AND rt.fire_at > ? AND rt.seen_at IS NULL
+           AND (rt.delivered_at IS NULL OR rt.delivered_at <= ?)`,
       )
-      .all(now)) as Array<Record<string, unknown>>;
+      .all(now, now - RENAG_CAP_MS, now - RENAG_INTERVAL_MS)) as Array<Record<string, unknown>>;
     let delivered = 0;
     for (const trigger of due) {
       const userId = String(trigger.user_id);
       const itemId = String(trigger.item_id);
+      const isFirstDelivery = trigger.delivered_at == null;
       if (trigger.status === 'done' || trigger.status === 'dismissed') {
-        await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ? WHERE id = ?').run(now, String(trigger.id));
+        await this.db
+          .prepare('UPDATE reminder_triggers SET delivered_at = ?, seen_at = ? WHERE id = ?')
+          .run(now, now, String(trigger.id));
         continue;
       }
       let message: string;
@@ -174,26 +201,34 @@ export class ReminderScheduler {
         message = `Reminder: ${String(trigger.title)}`;
       }
       // Explicit-time reminders fire regardless of quiet hours — the user asked.
+      // Dedup key includes `now` (not the constant fire_at) so each re-nag attempt
+      // is its own delivery, not deduped against the first one.
       const sent = await this.dispatcher.notify(
         userId,
-        `reminder:${String(trigger.id)}:${String(trigger.fire_at)}`,
+        `reminder:${String(trigger.id)}:${now}`,
         'Scrible',
         message,
+        { data: { reminderId: String(trigger.id) } },
       );
       await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(trigger.id));
       if (sent) delivered++;
 
-      if (trigger.recurrence) {
-        const next = nextOccurrence(Number(trigger.fire_at), String(trigger.recurrence));
-        if (next) {
-          await this.db
-            .prepare(
-              'INSERT INTO reminder_triggers (id, user_id, item_id, fire_at, recurrence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            )
-            .run(randomUUID(), userId, itemId, next, String(trigger.recurrence), now, now);
+      // Recurrence and the audit trail are logical, one-time events tied to the
+      // reminder's original due time — only fire them on the first delivery, not
+      // on every re-nag.
+      if (isFirstDelivery) {
+        if (trigger.recurrence) {
+          const next = nextOccurrence(Number(trigger.fire_at), String(trigger.recurrence));
+          if (next) {
+            await this.db
+              .prepare(
+                'INSERT INTO reminder_triggers (id, user_id, item_id, fire_at, recurrence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              )
+              .run(randomUUID(), userId, itemId, next, String(trigger.recurrence), now, now);
+          }
         }
+        await this.sync.audit(userId, 'reminder.delivered', 'reminder_trigger', String(trigger.id), { fireAt: trigger.fire_at });
       }
-      await this.sync.audit(userId, 'reminder.delivered', 'reminder_trigger', String(trigger.id), { fireAt: trigger.fire_at });
     }
     return delivered;
   }

@@ -91,6 +91,67 @@ test('recurring reminder schedules the next occurrence after firing', async () =
   assert.equal(pending[0].fireAt - first.fireAt, 24 * 3600_000);
 });
 
+test('reminder re-nags every 5 minutes until the 2h cap, then stops', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'r5', rawText: 'remind me to check the oven in 1 minute', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+  const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  const fireTime = trigger.fireAt + 1000;
+
+  assert.equal(await ctx.reminders.tick(fireTime), 1, 'first delivery');
+  assert.equal(await ctx.reminders.tick(fireTime + 60_000), 0, 'no re-nag within 5 minutes');
+  assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 1000), 1, 're-nags after 5 minutes');
+  assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 2000), 0, 'no re-nag immediately after re-nagging');
+  assert.equal(await ctx.reminders.tick(fireTime + 2 * 3600_000 + 60_000), 0, 'stops nagging past the 2h cap');
+});
+
+test('POST /v1/reminders/:id/seen acknowledges a reminder and stops further re-nagging', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'r6', rawText: 'remind me to water the plants in 1 minute', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+  const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  const fireTime = trigger.fireAt + 1000;
+  assert.equal(await ctx.reminders.tick(fireTime), 1, 'first delivery');
+
+  const seen = await ctx.app.inject({
+    method: 'POST',
+    url: `/v1/reminders/${trigger.id}/seen`,
+    headers: auth(token),
+  });
+  assert.equal(seen.statusCode, 200);
+  assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 1000), 0, 'acknowledged reminder never re-nags');
+});
+
+test('completing an item after first delivery stops further re-nagging', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'r7', rawText: 'remind me to call mom in 1 minute', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+  const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  const fireTime = trigger.fireAt + 1000;
+  assert.equal(await ctx.reminders.tick(fireTime), 1, 'first delivery');
+
+  await ctx.app.inject({ method: 'POST', url: '/v1/items/r7/complete', headers: auth(token) });
+  assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 1000), 0, 'completed reminder never re-nags');
+});
+
 test('confirmation notifications respect quiet hours but reminders do not', async () => {
   const ctx = await testApp();
   const { token, userId } = await signup(ctx);

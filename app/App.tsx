@@ -10,6 +10,7 @@ import { QueueScreen } from './src/screens/Queue';
 import { ActivityScreen } from './src/screens/Activity';
 import { SettingsScreen } from './src/screens/Settings';
 import { configureAnalytics, surface, track } from './src/analytics';
+import { setupPushNotifications } from './src/push';
 import { colors } from './src/theme';
 
 const API_URL =
@@ -59,6 +60,13 @@ export default function App() {
       if (timer.current) clearInterval(timer.current);
     };
   }, [token, store]);
+
+  // Register for push once signed in — covers both a restored session and a fresh
+  // login/signup, since both paths set `token`.
+  useEffect(() => {
+    if (!token) return;
+    void setupPushNotifications(api);
+  }, [token, api]);
 
   const authenticate = async (mode: 'login' | 'signup', email: string, password: string) => {
     const res = mode === 'login' ? await api.login(email, password) : await api.signup(email, password);

@@ -1,6 +1,17 @@
 /** Lean typed client for the Scrible backend (desktop needs only these calls). */
 import type { TriggerItem } from './matcher';
 
+export interface ReminderTrigger {
+  id: string;
+  itemId: string;
+  title: string;
+  fireAt: number;
+  recurrence: string | null;
+  snoozedUntil: number | null;
+  deliveredAt: number | null;
+  seenAt: number | null;
+}
+
 export interface ItemChange {
   seq: number;
   entityType: string;
@@ -57,6 +68,14 @@ export class DesktopApi {
 
   async completeItem(id: string): Promise<void> {
     await this.req('POST', `/v1/items/${id}/complete`, {});
+  }
+
+  async reminders(): Promise<ReminderTrigger[]> {
+    return this.req('GET', '/v1/reminders');
+  }
+
+  async markReminderSeen(id: string): Promise<void> {
+    await this.req('POST', `/v1/reminders/${id}/seen`, {});
   }
 
   async watcherConsent(): Promise<boolean> {
