@@ -10,7 +10,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://scrible-api.fly.dev"
+        "EXPO_PUBLIC_API_URL": "https://scribble-rjma.onrender.com"
       }
     }
   }
