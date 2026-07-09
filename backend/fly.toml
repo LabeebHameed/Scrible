@@ -1,7 +1,7 @@
-# Fly.io app config for the Scrible backend. Lives at the repo root (not backend/)
-# so the Docker build context is the whole monorepo — backend/Dockerfile needs the
-# root package.json/package-lock.json for npm workspaces resolution. Deploy from the
-# repo root: `fly deploy` (this file is picked up automatically as ./fly.toml).
+# Fly.io app config for the Scrible backend. Lives in backend/, alongside the
+# Dockerfile — this directory is a self-contained deploy unit (no cross-workspace
+# dependencies), so both live in the same build context. Deploy from here:
+# `cd backend && fly deploy` (this file is picked up automatically as ./fly.toml).
 #
 # SQLite lives on a persistent volume (node:sqlite writes a single file; this is
 # stateful, single-instance storage, not ephemeral container disk). Adjust `app`
@@ -10,7 +10,7 @@ app = "scrible-api"
 primary_region = "iad"
 
 [build]
-  dockerfile = "backend/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "8787"
