@@ -1,6 +1,6 @@
 /**
  * Generic OpenAI-compatible chat-completions provider (Phase 9). Targets NVIDIA
- * NIM's free-tier catalog (e.g. MiniMax M3) by default, but works against any
+ * NIM's free-tier catalog (e.g. Llama 3.1) by default, but works against any
  * OpenAI-chat-compatible endpoint — same transport, just a different base URL.
  *
  * No SDK dependency: Node's global `fetch` is enough. Any failure (network, non-2xx,
@@ -75,7 +75,12 @@ export class OpenAICompatibleProvider {
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error('nvidia provider: no message content');
+    if (!content) {
+      // A 200 with no choices happens when the requested model isn't actually
+      // available on this account/tier — silent otherwise, since it isn't an HTTP error.
+      console.error(`nvidia provider: empty response for model "${this.config.model}": ${JSON.stringify(body).slice(0, 500)}`);
+      throw new Error('nvidia provider: no message content');
+    }
     return {
       data: extractJson(content) as T,
       usage: {

@@ -33,7 +33,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     jwtSecret,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     nvidiaApiKey: env.NVIDIA_API_KEY,
-    nvidiaModel: env.NVIDIA_MODEL ?? 'minimaxai/minimax-m3',
+    nvidiaModel: env.NVIDIA_MODEL ?? 'meta/llama-3.1-8b-instruct',
     nvidiaBaseUrl: env.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
     flags: {
       autoClassify: env.FLAG_AUTO_CLASSIFY !== '0',
