@@ -100,8 +100,10 @@ export class OpenAICompatibleProvider {
       recurrence: string | null;
       computerAction: boolean;
       appTrigger: string | null;
+      importance: 'major' | 'normal';
+      routineFact: { label: string; days?: number[]; startHour: number; endHour?: number } | null;
     }>(
-      `${classifyPrompt(input.context.timezone)} Respond as JSON: { type: "task"|"idea"|"reminder", confidence: number 0-1, title: string, timePhrase: string|null, timeAtIso: string|null (ISO 8601), recurrence: string|null, computerAction: boolean, appTrigger: string|null }.`,
+      `${classifyPrompt(input.context.timezone, input.profile?.routines)} Respond as JSON: { type: "task"|"idea"|"reminder", confidence: number 0-1, title: string, timePhrase: string|null, timeAtIso: string|null (ISO 8601), recurrence: string|null, computerAction: boolean, appTrigger: string|null, importance: "major"|"normal", routineFact: {label:string, days?:number[], startHour:number, endHour?:number}|null }.`,
       JSON.stringify({ transcript: input.text, localHour: input.context.localHour, recentTypes: input.context.recentTypes }),
     );
     let at: number | undefined;
@@ -124,6 +126,16 @@ export class OpenAICompatibleProvider {
       timeIntent: timeIntent && (timeIntent.at || timeIntent.phrase) ? timeIntent : null,
       contextTag: out.computerAction || out.appTrigger ? 'computer-action' : null,
       appTrigger: out.appTrigger ? out.appTrigger.toLowerCase().slice(0, 40) : null,
+      importance: out.importance === 'major' ? 'major' : 'normal',
+      routineFact:
+        out.routineFact && out.routineFact.label?.trim() && Number.isInteger(out.routineFact.startHour)
+          ? {
+              label: out.routineFact.label.trim().slice(0, 80),
+              ...(out.routineFact.days?.length ? { days: out.routineFact.days.filter((d) => d >= 0 && d <= 6) } : {}),
+              startHour: Math.max(0, Math.min(23, out.routineFact.startHour)),
+              ...(out.routineFact.endHour != null ? { endHour: Math.max(0, Math.min(23, out.routineFact.endHour)) } : {}),
+            }
+          : null,
     };
     tracker.set(result, usage);
     return result;

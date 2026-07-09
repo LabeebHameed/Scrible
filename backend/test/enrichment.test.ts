@@ -1,6 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testApp, signup, auth } from './helpers.js';
+import { testApp, signup, auth, resetTestSchema, TEST_DATABASE_URL } from './helpers.js';
+import { buildApp } from '../src/server.js';
+import { enableEnrichment } from '../src/enrichment.js';
+
+function withStubbedFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = impl;
+  return fn().finally(() => {
+    globalThis.fetch = original;
+  });
+}
+
+function nvidiaStub(content: Record<string, unknown>): typeof fetch {
+  return (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(content) } }],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+}
 
 test('capture is classified, decomposed, and summarized asynchronously', async () => {
   const ctx = await testApp({ autoClassify: true });
@@ -115,6 +137,123 @@ test('spoken done with no match does not complete anything', async () => {
     payload: { utterance: 'done with the tax filing' },
   });
   assert.equal(res.json().completed, null);
+});
+
+test('a stated routine fact is auto-completed and remembered in the profile, not left as a task', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({
+    databaseUrl: TEST_DATABASE_URL,
+    jwtSecret: 'test-secret',
+    flags: { autoClassify: true, autoSchedule: false, personalization: true, analytics: false },
+    nvidiaApiKey: 'fake-nvidia-key',
+  });
+  enableEnrichment(ctx);
+  const { token } = await signup(ctx);
+
+  await withStubbedFetch(
+    nvidiaStub({
+      type: 'task',
+      confidence: 0.5,
+      title: 'college schedule',
+      timePhrase: null,
+      timeAtIso: null,
+      recurrence: null,
+      computerAction: false,
+      appTrigger: null,
+      importance: 'normal',
+      routineFact: { label: 'college until 4pm on weekdays', days: [1, 2, 3, 4, 5], startHour: 8, endHour: 16 },
+    }),
+    async () => {
+      await ctx.app.inject({
+        method: 'POST',
+        url: '/v1/items',
+        headers: auth(token),
+        payload: { id: 'rf1', rawText: "I'm at college until 4pm on weekdays", source: 'voice' },
+      });
+      await ctx.jobs.onIdle();
+    },
+  );
+
+  const item = (await ctx.app.inject({ method: 'GET', url: '/v1/items/rf1', headers: auth(token) })).json();
+  assert.equal(item.status, 'done', 'a routine fact is not left as an open task');
+  assert.match(item.title, /college until 4pm/i);
+
+  const profile = (await ctx.app.inject({ method: 'GET', url: '/v1/profile', headers: auth(token) })).json();
+  assert.deepEqual(profile.attributes.routines, [
+    { label: 'college until 4pm on weekdays', days: [1, 2, 3, 4, 5], startHour: 8, endHour: 16 },
+  ]);
+});
+
+test('a major item with an explicit time gets both a reminder and a calendar block; a normal one gets only a reminder', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({
+    databaseUrl: TEST_DATABASE_URL,
+    jwtSecret: 'test-secret',
+    flags: { autoClassify: true, autoSchedule: true, personalization: false, analytics: false },
+    nvidiaApiKey: 'fake-nvidia-key',
+  });
+  enableEnrichment(ctx);
+  const { token } = await signup(ctx);
+  const at = new Date(Date.now() + 2 * 3600_000).toISOString();
+
+  await withStubbedFetch(
+    nvidiaStub({
+      type: 'reminder',
+      confidence: 0.9,
+      title: 'Client meeting',
+      timePhrase: 'in 2 hours',
+      timeAtIso: at,
+      recurrence: null,
+      computerAction: false,
+      appTrigger: null,
+      importance: 'major',
+      routineFact: null,
+    }),
+    async () => {
+      await ctx.app.inject({
+        method: 'POST',
+        url: '/v1/items',
+        headers: auth(token),
+        payload: { id: 'maj1', rawText: 'client meeting in 2 hours', source: 'voice' },
+      });
+      await ctx.jobs.onIdle();
+    },
+  );
+
+  const reminders = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  assert.equal(reminders.length, 1, 'still gets reminded like anything else');
+  const schedule = (await ctx.app.inject({ method: 'GET', url: '/v1/schedule', headers: auth(token) })).json();
+  assert.equal(schedule.length, 1, 'major item also gets a calendar block');
+  assert.equal(schedule[0].itemId, 'maj1');
+
+  await withStubbedFetch(
+    nvidiaStub({
+      type: 'reminder',
+      confidence: 0.9,
+      title: 'Take out the trash',
+      timePhrase: 'in 2 hours',
+      timeAtIso: at,
+      recurrence: null,
+      computerAction: false,
+      appTrigger: null,
+      importance: 'normal',
+      routineFact: null,
+    }),
+    async () => {
+      await ctx.app.inject({
+        method: 'POST',
+        url: '/v1/items',
+        headers: auth(token),
+        payload: { id: 'norm1', rawText: 'take out the trash in 2 hours', source: 'voice' },
+      });
+      await ctx.jobs.onIdle();
+    },
+  );
+
+  const remindersAfter = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  assert.equal(remindersAfter.length, 2, 'normal item still gets reminded');
+  const scheduleAfter = (await ctx.app.inject({ method: 'GET', url: '/v1/schedule', headers: auth(token) })).json();
+  assert.equal(scheduleAfter.length, 1, 'normal item does not clutter the calendar');
 });
 
 test('queue orders explicit times first', async () => {

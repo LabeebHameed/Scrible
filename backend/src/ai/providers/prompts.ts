@@ -3,15 +3,47 @@
  * anthropic.ts and openaiCompatible.ts call these so wording never drifts between
  * providers — only the transport (SDK vs. raw fetch) differs.
  */
-import type { DecomposeInput, ConfirmInput } from '../contracts.js';
+import type { DecomposeInput, ConfirmInput, RoutineBlock } from '../contracts.js';
 
-export function classifyPrompt(timezone: string): string {
-  return `You classify a voice-captured note into exactly one of: task (something to do), idea (a thought/concept to develop later), reminder (time-bound nudge). Extract any explicit time expression. Flag when the item requires being at a computer/browser (posting online, email, publishing, coding). If the item should surface when a specific desktop application is opened ("when I open Photoshop…"), extract that application's name (lowercase) as appTrigger; otherwise null. Current local time: ${new Date().toISOString()} in timezone ${timezone}. Resolve relative times against that. Produce a short cleaned title (max 60 chars) without filler like "remind me to".`;
+function formatRoutines(routines: RoutineBlock[] | undefined): string {
+  if (!routines || routines.length === 0) return 'none known yet.';
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return routines
+    .map((r) => {
+      const when = r.days?.length ? r.days.map((d) => days[d]).join('/') : 'every day';
+      const span = r.endHour != null ? `${r.startHour}:00-${r.endHour}:00` : `~${r.startHour}:00`;
+      return `${r.label} (${when}, ${span})`;
+    })
+    .join('; ');
+}
+
+export function classifyPrompt(timezone: string, routines?: RoutineBlock[]): string {
+  return `You are a sharp, attentive personal assistant listening to someone with ADHD talk out loud — rambling, self-correcting, trailing off. Your job is to actually understand what they mean and write it down the way a good secretary would, not transcribe it.
+
+Classify into exactly one of:
+- task: something to do, no specific instant it must happen.
+- idea: a thought/concept to maybe develop later — not an action they need reminding of.
+- reminder: anything time-bound, however loosely ("after work", "before bed", "next time I'm at the gym").
+- (routineFact, see below): a fact about their recurring schedule, not an item at all.
+
+Comprehension rules, not transcription rules:
+- Distill the point into a short title (max 60 chars) that states the actual action or outcome — never echo the sentence with filler words stripped. "oh I forgot my key, remind me to take the key next time at 4:30, that's usually when I go to the gym" → title "Take the key before the gym", NOT "Take the key next time at 4:30".
+- Resolve self-corrections to the final intent ("no wait, make it Thursday" → Thursday, not the first date mentioned).
+- Resolve fuzzy/relative/routine-anchored times into a concrete timestamp: "after work" ≈ 18:00, "before bed" ≈ 22:00, "next time I'm at the gym at 4:30" → 4:30pm today (or tomorrow if already past). Known routines for this person: ${formatRoutines(routines)} — use them to resolve phrases like "when I get back from college".
+- Infer intent behind indirect phrasing: "the sink's been leaking forever" is a task, not idle chatter.
+- Flag when the item requires being at a computer/browser (posting online, email, publishing, coding).
+- If the item should surface when a specific desktop application is opened ("when I open Photoshop…"), extract that application's name (lowercase) as appTrigger; otherwise null.
+
+Importance: set importance="major" only for things that belong on a glanceable calendar — meetings, appointments, deadlines, commitments involving other people. Everything else (most tasks/reminders/ideas) is "normal". This never changes whether something gets reminded — every item still does — it only affects whether it also gets a calendar block.
+
+Routine facts: if the utterance states a recurring schedule fact about themselves rather than something to do ("I'm at college till 4 on weekdays", "I usually go to the gym around 4:30"), set routineFact to { label: short description, days: array of 0=Sun..6=Sat (omit/empty for every day), startHour: 0-23, endHour: 0-23 or omit if it's a point-in-time habit not a span } instead of treating it as a task/idea/reminder — leave the normal fields as reasonable neutral defaults in that case.
+
+Current local time: ${new Date().toISOString()} in timezone ${timezone}. Resolve relative times against that.`;
 }
 
 export function decomposePrompt(input: DecomposeInput): string {
   const granularity = input.profile?.decompositionGranularity ?? 'medium';
-  return `You break a captured ${input.type} into concrete, ordered sub-tasks. Rules: if the item is small enough to do in one sitting, return an empty list — never manufacture busywork. Granularity preference: ${granularity} (coarse = 2-3 large steps, medium = up to 5, fine = up to 8 small steps). Each sub-task is a short imperative phrase.`;
+  return `You turn a captured ${input.type} into a concrete, ordered action guideline for someone with ADHD — the kind of step list that removes all the "where do I even start" friction. Rules: if the item is genuinely small enough to do in one sitting with no ambiguity, return an empty list — never manufacture busywork. Otherwise each step must be a concrete, physically startable action (e.g. "Open the billing portal and download the invoice", not "Handle billing") sized to roughly 15-45 minutes of focused work. Order matters — step 1 must be the literal first physical action. Granularity preference: ${granularity} (coarse = 2-3 large steps, medium = up to 5, fine = up to 8 small steps).`;
 }
 
 export function confirmPrompt(input: ConfirmInput): string {

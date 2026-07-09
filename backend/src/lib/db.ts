@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS items (
   status TEXT NOT NULL DEFAULT 'captured',
   context_tag TEXT,
   app_trigger TEXT,
+  importance TEXT NOT NULL DEFAULT 'normal',
   time_intent TEXT,
   summary TEXT,
   field_versions TEXT NOT NULL DEFAULT '{}',
@@ -353,6 +354,7 @@ export async function openDb(connectionString: string): Promise<Db> {
   // Additive migration for pre-existing databases (CREATE TABLE IF NOT EXISTS won't
   // alter an existing table); Postgres's IF NOT EXISTS makes this idempotent natively.
   await db.exec('ALTER TABLE items ADD COLUMN IF NOT EXISTS app_trigger TEXT');
+  await db.exec("ALTER TABLE items ADD COLUMN IF NOT EXISTS importance TEXT NOT NULL DEFAULT 'normal'");
   return db;
 }
 

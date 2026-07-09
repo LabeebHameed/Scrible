@@ -147,7 +147,16 @@ export function classifyHeuristic(input: ClassifyInput): ClassifyOutput {
   }
   const contextTag =
     type !== 'idea' && (COMPUTER_ACTION.test(text) || appTrigger) ? 'computer-action' : null;
-  return { type, confidence, timeIntent, contextTag, appTrigger, title: cleanTitle(text) };
+  return {
+    type,
+    confidence,
+    timeIntent,
+    contextTag,
+    appTrigger,
+    title: cleanTitle(text),
+    importance: 'normal',
+    routineFact: null,
+  };
 }
 
 export function cleanTitle(text: string): string {

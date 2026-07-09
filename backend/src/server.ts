@@ -94,8 +94,10 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
     analytics,
   };
 
-  // Scheduling path (plan §2.3): after an item is enriched, reminders get triggers
-  // and ideas get calendar blocks — async, confirmed in plain language, undoable.
+  // Scheduling path: after an item is enriched, reminders get triggers (every item,
+  // major or not, still gets reminded) and only "major" items — meetings, appointments,
+  // deadlines — also get a calendar block, so the calendar stays scannable instead of
+  // filling up with every small thing. Async, confirmed in plain language, undoable.
   ctx.afterEnrichment = (userId, itemId) => {
     jobs.enqueue(async () => {
       const item = await sync.itemById(userId, itemId);
@@ -110,7 +112,8 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
           detail: { when: new Date(item.timeIntent.at).toLocaleString() },
         });
         await calendar.recordActivity(userId, confirm.message, 'reminder_set', { itemId, undoable: false });
-      } else if (item.type === 'idea' && config.flags.autoSchedule) {
+      }
+      if (item.importance === 'major' && item.timeIntent?.at && config.flags.autoSchedule) {
         await calendar.autoSchedule(userId, itemId);
       }
     });

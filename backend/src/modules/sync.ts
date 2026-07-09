@@ -173,7 +173,7 @@ export class SyncEngine {
           string,
           number
         >;
-        const editable = ['title', 'rawText', 'type', 'status', 'contextTag', 'appTrigger', 'timeIntent', 'summary', 'confidence'] as const;
+        const editable = ['title', 'rawText', 'type', 'status', 'contextTag', 'appTrigger', 'importance', 'timeIntent', 'summary', 'confidence'] as const;
         const colOf: Record<string, string> = {
           title: 'title',
           rawText: 'raw_text',
@@ -181,6 +181,7 @@ export class SyncEngine {
           status: 'status',
           contextTag: 'context_tag',
           appTrigger: 'app_trigger',
+          importance: 'importance',
           timeIntent: 'time_intent',
           summary: 'summary',
           confidence: 'confidence',
@@ -394,6 +395,7 @@ export function rowToItem(r: Record<string, unknown>): Item {
     status: r.status as Item['status'],
     contextTag: r.context_tag == null ? null : String(r.context_tag),
     appTrigger: r.app_trigger == null ? null : String(r.app_trigger),
+    importance: r.importance === 'major' ? 'major' : 'normal',
     timeIntent: r.time_intent ? JSON.parse(String(r.time_intent)) : null,
     summary: r.summary == null ? null : String(r.summary),
     createdAt: Number(r.created_at),

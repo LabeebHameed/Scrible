@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AppContext } from './server.js';
 import type { ItemType } from './types.js';
-import { loadEffectiveProfile } from './modules/profile.js';
+import { loadEffectiveProfile, recordRoutineFact } from './modules/profile.js';
 import { splitUtterance } from './ai/providers/heuristic.js';
 
 export function enableEnrichment(ctx: AppContext): void {
@@ -60,6 +60,23 @@ export function enableEnrichment(ctx: AppContext): void {
         profile,
       });
 
+      // A stated routine fact ("I'm at college till 4 on weekdays") isn't an
+      // actionable item — remember it for future understanding/scheduling and
+      // auto-complete instead of running decompose/confirm on it.
+      if (cls.routineFact) {
+        if (ctx.config.flags.personalization) {
+          await recordRoutineFact(db, userId, cls.routineFact);
+        }
+        await sync.serverUpdateItem(userId, itemId, {
+          title: `Noted: ${cls.routineFact.label}`,
+          confidence: cls.confidence,
+          summary: `Got it — I'll remember: ${cls.routineFact.label}.`,
+        });
+        await sync.applyOps(userId, [{ opId: randomUUID(), ts: Date.now(), kind: 'item.complete', entityId: itemId }]);
+        await sync.audit(userId, 'item.routine_noted', 'item', itemId, { label: cls.routineFact.label }, true);
+        return;
+      }
+
       const dec = await orchestrator.run('decompose', {
         text: item.rawText,
         type: cls.type,
@@ -91,6 +108,7 @@ export function enableEnrichment(ctx: AppContext): void {
         confidence: cls.confidence,
         contextTag: cls.contextTag,
         appTrigger: cls.appTrigger,
+        importance: cls.importance,
         timeIntent: cls.timeIntent,
         summary: confirm.message,
         status: 'active',

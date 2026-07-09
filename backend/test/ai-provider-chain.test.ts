@@ -141,6 +141,175 @@ test('nvidia provider failure (bad status or malformed JSON) falls through to he
   });
 });
 
+test('classify: with an LLM key configured, an explicit-hint phrase skips heuristic-confident and reaches the LLM', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'reminder',
+                confidence: 0.9,
+                title: 'Call the dentist',
+                timePhrase: 'tomorrow',
+                timeAtIso: null,
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'normal',
+                routineFact: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 30, completion_tokens: 6 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    // Same phrase as the very first test in this file — there it short-circuits at
+    // heuristic-confident with zero tokens; with an LLM key present it must NOT.
+    const out = await ctx.orchestrator.run('classify', {
+      text: 'remind me to call the dentist tomorrow',
+      context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.equal(out.type, 'reminder');
+    const last = ctx.orchestrator.recentMetrics(10).filter((m) => m.capability === 'classify').pop()!;
+    assert.equal(last.provider, 'nvidia');
+    assert.equal(last.inputTokens, 30);
+    assert.ok(
+      !ctx.orchestrator.recentMetrics(10).some((m) => m.capability === 'classify' && m.provider === 'heuristic-confident'),
+      'heuristic-confident must not be registered at all when an LLM key is configured',
+    );
+  });
+});
+
+test('classify: importance and routineFact pass through from the LLM response', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'reminder',
+                confidence: 0.9,
+                title: 'Client meeting',
+                timePhrase: '3pm',
+                timeAtIso: new Date(Date.now() + 3600_000).toISOString(),
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'major',
+                routineFact: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: 'client meeting at 3pm',
+      context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.equal(out.importance, 'major');
+  });
+});
+
+test('classify: a stated routine fact is returned structured, not treated as an item', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'task',
+                confidence: 0.5,
+                title: 'college schedule',
+                timePhrase: null,
+                timeAtIso: null,
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'normal',
+                routineFact: { label: 'college until 4pm on weekdays', days: [1, 2, 3, 4, 5], startHour: 8, endHour: 16 },
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 25, completion_tokens: 10 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: "I'm at college until 4pm on weekdays",
+      context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.deepEqual(out.routineFact, {
+      label: 'college until 4pm on weekdays',
+      days: [1, 2, 3, 4, 5],
+      startHour: 8,
+      endHour: 16,
+    });
+  });
+});
+
+test('classify: importance and routineFact default safely when the LLM omits them', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'idea',
+                confidence: 0.6,
+                title: 'Rework the onboarding flow',
+                timePhrase: null,
+                timeAtIso: null,
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 15, completion_tokens: 4 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: 'maybe rework how new users get onboarded at some point',
+      context: { localHour: 10, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.equal(out.importance, 'normal');
+    assert.equal(out.routineFact, null);
+  });
+});
+
 test('zero-config smoke: with no AI keys at all, every capability still resolves — never fails, never costs anything', async () => {
   const ctx = await testApp();
   const out = await ctx.orchestrator.run('classify', {

@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { Db } from '../lib/db.js';
 import type { SyncEngine } from '../modules/sync.js';
 import type { Orchestrator } from '../ai/orchestrator.js';
-import type { ProfileAttributes } from '../ai/contracts.js';
+import type { ProfileAttributes, RoutineBlock } from '../ai/contracts.js';
 import { parseImport, type ImportSource } from '../imports/parsers.js';
 import { hasConsent } from './consent.js';
 import { learnedSummary, learnedVocabulary } from '../ai/learning.js';
@@ -34,6 +34,60 @@ export async function loadEffectiveProfile(db: Db, userId: string): Promise<Prof
     return { ...s.attributes, ...s.overrides };
   }
   return stored as ProfileAttributes;
+}
+
+interface StoredProfileEnvelope {
+  attributes: ProfileAttributes;
+  overrides: Partial<ProfileAttributes>;
+}
+
+function normalizeStored(raw: string | undefined): StoredProfileEnvelope {
+  if (!raw) return { attributes: {}, overrides: {} };
+  const parsed = JSON.parse(raw) as StoredProfileEnvelope | ProfileAttributes;
+  return 'attributes' in parsed && typeof parsed.attributes === 'object'
+    ? (parsed as StoredProfileEnvelope)
+    : { attributes: parsed as ProfileAttributes, overrides: {} };
+}
+
+/**
+ * A routine fact stated in normal conversation ("I'm at college till 4 on weekdays")
+ * folds straight into the profile — no chat_import consent needed, this is the user
+ * telling the assistant about themselves directly, not an imported chat history.
+ */
+export async function recordRoutineFact(db: Db, userId: string, routine: RoutineBlock): Promise<void> {
+  const row = (await db.prepare('SELECT attributes FROM profiles WHERE user_id = ?').get(userId)) as
+    | { attributes: string }
+    | undefined;
+  const stored = normalizeStored(row?.attributes);
+  const withoutDup = (stored.attributes.routines ?? []).filter(
+    (r) => r.label.toLowerCase() !== routine.label.toLowerCase(),
+  );
+  const attributes: ProfileAttributes = { ...stored.attributes, routines: [...withoutDup, routine].slice(-20) };
+  const now = Date.now();
+  if (row) {
+    await db
+      .prepare('UPDATE profiles SET attributes = ?, updated_at = ? WHERE user_id = ?')
+      .run(JSON.stringify({ attributes, overrides: stored.overrides }), now, userId);
+  } else {
+    await db
+      .prepare('INSERT INTO profiles (user_id, attributes, sources, storage, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(userId, JSON.stringify({ attributes, overrides: {} }), JSON.stringify(['routine']), 'server', now);
+  }
+}
+
+export async function removeRoutine(db: Db, userId: string, label: string): Promise<boolean> {
+  const row = (await db.prepare('SELECT attributes FROM profiles WHERE user_id = ?').get(userId)) as
+    | { attributes: string }
+    | undefined;
+  if (!row) return false;
+  const stored = normalizeStored(row.attributes);
+  const before = stored.attributes.routines ?? [];
+  const routines = before.filter((r) => r.label !== label);
+  if (routines.length === before.length) return false;
+  await db
+    .prepare('UPDATE profiles SET attributes = ?, updated_at = ? WHERE user_id = ?')
+    .run(JSON.stringify({ attributes: { ...stored.attributes, routines }, overrides: stored.overrides }), Date.now(), userId);
+  return true;
 }
 
 export async function behavioralSignals(db: Db, userId: string) {
@@ -194,7 +248,14 @@ export function registerProfile(
       sources: ['manual'],
       storage: 'server',
     };
-    const allowed: Array<keyof ProfileAttributes> = ['tone', 'verbosity', 'decompositionGranularity', 'schedulingRhythm', 'vocabulary'];
+    const allowed: Array<keyof ProfileAttributes> = [
+      'tone',
+      'verbosity',
+      'decompositionGranularity',
+      'schedulingRhythm',
+      'vocabulary',
+      'routines',
+    ];
     for (const key of allowed) {
       if (key in edits) {
         (existing.profile.overrides as Record<string, unknown>)[key] = (edits as Record<string, unknown>)[key];
@@ -224,6 +285,15 @@ export function registerProfile(
       [...new Set([...(existing?.sources ?? []), 'on-device'])],
       'on-device-only',
     );
+    return { ok: true };
+  });
+
+  /** Delete one learned routine by label — transparency, never a black box. */
+  app.delete('/v1/profile/routines/:label', { preHandler: app.authenticate }, async (req, reply) => {
+    const { label } = req.params as { label: string };
+    const ok = await removeRoutine(db, req.userId, decodeURIComponent(label));
+    if (!ok) return reply.code(404).send({ error: 'not found' });
+    await sync.recordChange(req.userId, 'profile', req.userId, 'upsert', await loadEffectiveProfile(db, req.userId));
     return { ok: true };
   });
 

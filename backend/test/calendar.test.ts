@@ -65,8 +65,11 @@ test('availability excludes busy events and respects working hours', async () =>
   }
 });
 
-test('idea captured by voice lands as a calendar block with confirmation, undo removes it externally', async () => {
-  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
+test('a major item lands as a calendar block with confirmation, undo removes it externally', async () => {
+  // CalendarService.autoSchedule mechanics (undo, external write) are exercised
+  // directly here — the policy of WHICH items reach autoSchedule (only importance
+  // === 'major', see server.ts afterEnrichment) is covered in enrichment.test.ts.
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   const linkId = await linkInternalCalendar(ctx, token);
 
@@ -74,12 +77,11 @@ test('idea captured by voice lands as a calendar block with confirmation, undo r
     method: 'POST',
     url: '/v1/items',
     headers: auth(token),
-    payload: { id: 'idea1', rawText: 'idea: what if we made a podcast series about maker workflows', source: 'voice' },
+    payload: { id: 'idea1', rawText: 'podcast series planning meeting', source: 'voice', type: 'reminder' },
   });
-  await ctx.jobs.onIdle();
+  await ctx.calendar.autoSchedule(userId, 'idea1');
 
   const item = (await ctx.app.inject({ method: 'GET', url: '/v1/items/idea1', headers: auth(token) })).json();
-  assert.equal(item.type, 'idea');
   assert.equal(item.status, 'scheduled');
 
   const schedule = (await ctx.app.inject({ method: 'GET', url: '/v1/schedule', headers: auth(token) })).json();
@@ -110,7 +112,7 @@ test('idea captured by voice lands as a calendar block with confirmation, undo r
 });
 
 test('external meeting landing on a Scrible block displaces it — never silently', async () => {
-  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   const linkId = await linkInternalCalendar(ctx, token);
 
@@ -118,9 +120,9 @@ test('external meeting landing on a Scrible block displaces it — never silentl
     method: 'POST',
     url: '/v1/items',
     headers: auth(token),
-    payload: { id: 'idea2', rawText: 'idea: maybe we could build a community newsletter for early users', source: 'voice' },
+    payload: { id: 'idea2', rawText: 'community newsletter kickoff meeting', source: 'voice', type: 'reminder' },
   });
-  await ctx.jobs.onIdle();
+  await ctx.calendar.autoSchedule(userId, 'idea2');
   const [block] = (await ctx.app.inject({ method: 'GET', url: '/v1/schedule', headers: auth(token) })).json();
   assert.ok(block, 'block scheduled');
 
@@ -145,16 +147,16 @@ test('external meeting landing on a Scrible block displaces it — never silentl
 });
 
 test('scrible-owned events are never treated as foreign conflicts', async () => {
-  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await linkInternalCalendar(ctx, token);
   await ctx.app.inject({
     method: 'POST',
     url: '/v1/items',
     headers: auth(token),
-    payload: { id: 'idea3', rawText: 'idea: a what-if series on scrible power workflows sounds fun', source: 'voice' },
+    payload: { id: 'idea3', rawText: 'scrible power workflows review meeting', source: 'voice', type: 'reminder' },
   });
-  await ctx.jobs.onIdle();
+  await ctx.calendar.autoSchedule(userId, 'idea3');
   const [before] = (await ctx.app.inject({ method: 'GET', url: '/v1/schedule', headers: auth(token) })).json();
   // Sync pulls the Scrible-created event back — must not displace its own block.
   await ctx.calendar.syncUser(userId);

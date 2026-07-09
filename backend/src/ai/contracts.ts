@@ -38,6 +38,18 @@ export interface ClassifyOutput {
   appTrigger: string | null;
   /** Cleaned short title derived from the transcript. */
   title: string;
+  /**
+   * 'major' = meeting/appointment/deadline/commitment worth seeing on a calendar at a
+   * glance; 'normal' = everything else. Never affects reminders — every item still gets
+   * one — only whether it also gets a calendar block (see server.ts afterEnrichment).
+   */
+  importance: 'major' | 'normal';
+  /**
+   * A stated routine/habit fact ("I'm at college till 4 on weekdays"), not an
+   * actionable item. When set, the item is auto-completed and the fact is folded into
+   * the user's profile (as a RoutineBlock) so future captures/scheduling can use it.
+   */
+  routineFact: RoutineBlock | null;
 }
 
 export interface DecomposeInput {
@@ -102,6 +114,15 @@ export interface ScheduleOutput {
   rationale: string;
 }
 
+/** A stated recurring routine ("college weekdays 8-16", "gym ~16:30"). */
+export interface RoutineBlock {
+  label: string;
+  /** 0=Sunday..6=Saturday; empty/omitted = every day. */
+  days?: number[];
+  startHour: number;
+  endHour?: number;
+}
+
 /** Structured, human-readable profile — never raw chat text (build plan §3, §9). */
 export interface ProfileAttributes {
   tone?: 'brief' | 'neutral' | 'warm';
@@ -109,6 +130,7 @@ export interface ProfileAttributes {
   decompositionGranularity?: 'coarse' | 'medium' | 'fine';
   schedulingRhythm?: { creativeHours?: number[]; adminHours?: number[] };
   vocabulary?: string[];
+  routines?: RoutineBlock[];
 }
 
 export interface DeriveProfileInput {

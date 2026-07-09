@@ -21,6 +21,8 @@ export interface Item {
   contextTag: string | null;
   /** Desktop app-launch trigger, e.g. 'photoshop' — matched ON DEVICE only. */
   appTrigger: string | null;
+  /** 'major' items get a calendar block; every item, major or not, still gets reminded. */
+  importance: 'major' | 'normal';
   timeIntent: TimeIntent | null;
   summary: string | null;
   createdAt: number;

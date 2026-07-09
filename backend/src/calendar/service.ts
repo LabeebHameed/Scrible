@@ -14,6 +14,7 @@ import type { Orchestrator } from '../ai/orchestrator.js';
 import type { CalendarLinkRef, ProviderRegistry } from './provider.js';
 import type { Item } from '../types.js';
 import { loadEffectiveProfile } from '../modules/profile.js';
+import type { RoutineBlock } from '../ai/contracts.js';
 
 const WINDOW_PAST_MS = 24 * 3600_000;
 const WINDOW_FUTURE_MS = 30 * 24 * 3600_000;
@@ -200,6 +201,24 @@ export class CalendarService {
     for (const b of blocks) {
       if (excludeBlockId && String(b.id) === excludeBlockId) continue;
       busy.push({ start: Number(b.start_ts), end: Number(b.end_ts) });
+    }
+
+    // Stated routines with a real span (college, work, etc.) are busy too — a
+    // point-in-time habit (no endHour) is just a time anchor for understanding, not
+    // a scheduling blocker.
+    const profile = await loadEffectiveProfile(this.db, userId);
+    const routines = (profile?.routines ?? []).filter((r): r is RoutineBlock & { endHour: number } => r.endHour != null);
+    if (routines.length > 0) {
+      const cursor = new Date(from);
+      cursor.setHours(0, 0, 0, 0);
+      for (let day = new Date(cursor); day.getTime() < to; day.setDate(day.getDate() + 1)) {
+        for (const r of routines) {
+          if (r.days?.length && !r.days.includes(day.getDay())) continue;
+          const start = new Date(day).setHours(r.startHour, 0, 0, 0);
+          const end = new Date(day).setHours(r.endHour, 0, 0, 0);
+          if (end > start) busy.push({ start, end });
+        }
+      }
     }
     busy.sort((a, b) => a.start - b.start);
 

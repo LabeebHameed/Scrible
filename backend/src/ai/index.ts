@@ -11,17 +11,21 @@ import type { Db } from '../lib/db.js';
  * Build the orchestrator with each capability's provider chain (Phase 9 —
  * free-tier-first, automate-first design; see docs/AI-MAP.md).
  *
- * Chain order = preference:
+ * Chain order = preference, WHEN an LLM key is configured:
  *  1. `learned`            — 0 tokens, when the user's own corrections are confident.
- *  2. `heuristic-confident`— 0 tokens, when the deterministic heuristic's own signal
- *                            is already strong (explicit hints, strong overlap, etc).
- *  3. `nvidia`             — free-tier LLM (NVIDIA NIM or any OpenAI-compatible
+ *  2. `nvidia`             — free-tier LLM (NVIDIA NIM or any OpenAI-compatible
  *                            endpoint), tried before any paid provider.
- *  4. `anthropic`          — optional, paid, only registered if ANTHROPIC_API_KEY is
+ *  3. `anthropic`          — optional, paid, only registered if ANTHROPIC_API_KEY is
  *                            explicitly set (opt-in quality upgrade, not required).
- *  5. `heuristic`          — deterministic best-effort, always succeeds, guarantees
- *                            the app never hard-fails and never costs anything by
- *                            default.
+ *  4. `heuristic`          — deterministic best-effort, always succeeds, guarantees
+ *                            the app never hard-fails and never costs anything.
+ *
+ * `heuristic-confident` (0-token keyword/regex shortcuts) is only registered when NO
+ * LLM key is configured at all. With a free-tier LLM available, the common phrasings
+ * that used to short-circuit here (explicit "remind"/"idea" keywords) are exactly the
+ * bulk of real captures — skipping the LLM for them was the root cause of the app
+ * feeling like a keyword matcher instead of an assistant. Offline/no-key installs keep
+ * today's zero-token behavior unchanged.
  *
  * `confirm` intentionally skips both AI tiers — it fires on every event (captured,
  * scheduled, moved, conflict, completed) and templated heuristic messages already
@@ -31,12 +35,15 @@ import type { Db } from '../lib/db.js';
  */
 export function buildOrchestrator(config: Config, db: Db): Orchestrator {
   const orch = new Orchestrator();
+  const hasLLM = !!(config.nvidiaApiKey || config.anthropicApiKey);
 
   orch.register('classify', { name: 'learned', run: classifyLearned(db) });
-  orch.register('classify', { name: 'heuristic-confident', run: async (i) => classifyConfident(i) });
-  orch.register('decompose', { name: 'heuristic-confident', run: async (i) => decomposeConfident(i) });
   orch.register('matchDone', { name: 'learned', run: matchDoneLearned(db) });
-  orch.register('matchDone', { name: 'heuristic-confident', run: async (i) => matchDoneConfident(i) });
+  if (!hasLLM) {
+    orch.register('classify', { name: 'heuristic-confident', run: async (i) => classifyConfident(i) });
+    orch.register('decompose', { name: 'heuristic-confident', run: async (i) => decomposeConfident(i) });
+    orch.register('matchDone', { name: 'heuristic-confident', run: async (i) => matchDoneConfident(i) });
+  }
 
   if (config.nvidiaApiKey) {
     const nvidia = new OpenAICompatibleProvider({
