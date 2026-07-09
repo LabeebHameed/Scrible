@@ -87,7 +87,10 @@ async function startNative(h: DictationHandlers): Promise<DictationSession | nul
     ExpoSpeechRecognitionModule.start({
       lang: 'en-US',
       interimResults: true,
-      continuous: false,
+      // Keep listening through mid-thought pauses — `false` here ends the session on
+      // the platform's short built-in silence timeout (~1-2s), well before a normal
+      // pause; only the user's explicit stop (or a long silence) should end capture.
+      continuous: true,
     });
     return { stop: () => ExpoSpeechRecognitionModule.stop() };
   } catch {

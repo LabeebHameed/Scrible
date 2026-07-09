@@ -62,7 +62,14 @@ export class OpenAICompatibleProvider {
         response_format: { type: 'json_object' },
       }),
     });
-    if (!res.ok) throw new Error(`nvidia provider http ${res.status}`);
+    if (!res.ok) {
+      // Diagnostic only (API error detail, e.g. "model not found") — never transcript
+      // text, never the key. Without this, a bad NVIDIA_MODEL/key silently falls
+      // through to heuristic on every call with no way to tell why from the outside.
+      const detail = await res.text().catch(() => '');
+      console.error(`nvidia provider http ${res.status}: ${detail.slice(0, 500)}`);
+      throw new Error(`nvidia provider http ${res.status}`);
+    }
     const body = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
