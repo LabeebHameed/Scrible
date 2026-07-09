@@ -32,15 +32,15 @@ export function registerCalendarRoutes(
   calendar: CalendarService,
   reminders: ReminderScheduler,
 ): void {
-  const requireCalendarConsent = (userId: string): boolean => hasConsent(db, userId, 'calendar_access');
+  const requireCalendarConsent = (userId: string): Promise<boolean> => hasConsent(db, userId, 'calendar_access');
 
   app.get('/v1/calendar/links', { preHandler: app.authenticate }, async (req) =>
-    calendar.links(req.userId).map((l) => ({ id: l.id, provider: l.provider, accountId: l.accountId })),
+    (await calendar.links(req.userId)).map((l) => ({ id: l.id, provider: l.provider, accountId: l.accountId })),
   );
 
   /** Direct link creation: internal calendar, or pre-obtained provider tokens. */
   app.post('/v1/calendar/links', { preHandler: app.authenticate }, async (req, reply) => {
-    if (!requireCalendarConsent(req.userId)) {
+    if (!(await requireCalendarConsent(req.userId))) {
       return reply.code(403).send({ error: 'calendar_access consent required' });
     }
     const { provider, accountId, tokens } = (req.body ?? {}) as {
@@ -51,7 +51,7 @@ export function registerCalendarRoutes(
     if (!provider || !['internal', 'google', 'outlook', 'apple'].includes(provider)) {
       return reply.code(400).send({ error: 'provider must be internal|google|outlook|apple' });
     }
-    const id = calendar.createLink(
+    const id = await calendar.createLink(
       req.userId,
       provider,
       accountId ?? 'primary',
@@ -62,7 +62,7 @@ export function registerCalendarRoutes(
 
   app.delete('/v1/calendar/links/:id', { preHandler: app.authenticate }, async (req) => {
     const { id } = req.params as { id: string };
-    calendar.removeLink(req.userId, id);
+    await calendar.removeLink(req.userId, id);
     return { ok: true };
   });
 
@@ -76,12 +76,12 @@ export function registerCalendarRoutes(
         error: `${provider} OAuth is not configured on this server (set ${provider === 'google' ? 'GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET' : 'MS_CLIENT_ID/MS_CLIENT_SECRET'})`,
       });
     }
-    if (!requireCalendarConsent(req.userId)) {
+    if (!(await requireCalendarConsent(req.userId))) {
       return reply.code(403).send({ error: 'calendar_access consent required' });
     }
     const { redirectUri } = req.query as { redirectUri?: string };
     const state = randomUUID();
-    db.prepare(
+    await db.prepare(
       'INSERT INTO processed_ops (op_id, user_id, result, created_at) VALUES (?, ?, ?, ?)',
     ).run(`oauth:${state}`, req.userId, JSON.stringify({ provider, redirectUri }), Date.now());
     const url = new URL(cfg.authUrl);
@@ -101,9 +101,9 @@ export function registerCalendarRoutes(
     const cfg = OAUTH_CONFIG[provider];
     if (!cfg?.clientId()) return reply.code(501).send({ error: 'provider not configured' });
     const { code, state, redirectUri } = (req.body ?? {}) as Record<string, string>;
-    const pending = db
+    const pending = (await db
       .prepare('SELECT user_id FROM processed_ops WHERE op_id = ?')
-      .get(`oauth:${state}`) as { user_id: string } | undefined;
+      .get(`oauth:${state}`)) as { user_id: string } | undefined;
     if (!pending || pending.user_id !== req.userId) {
       return reply.code(400).send({ error: 'invalid oauth state' });
     }
@@ -120,7 +120,7 @@ export function registerCalendarRoutes(
     });
     if (!res.ok) return reply.code(502).send({ error: `token exchange failed (${res.status})` });
     const tokens = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
-    const id = calendar.createLink(
+    const id = await calendar.createLink(
       req.userId,
       provider,
       'primary',
@@ -143,7 +143,7 @@ export function registerCalendarRoutes(
       (req.headers['x-goog-channel-token'] as string | undefined) ??
       ((req.body ?? {}) as { value?: Array<{ clientState?: string }> }).value?.[0]?.clientState;
     if (linkId) {
-      const row = db.prepare('SELECT user_id FROM calendar_links WHERE id = ?').get(linkId) as
+      const row = (await db.prepare('SELECT user_id FROM calendar_links WHERE id = ?').get(linkId)) as
         | { user_id: string }
         | undefined;
       if (row) void calendar.syncUser(row.user_id).catch(() => {});
@@ -160,15 +160,15 @@ export function registerCalendarRoutes(
     const { from, to } = req.query as { from?: string; to?: string };
     const start = Number(from ?? Date.now());
     const end = Number(to ?? Date.now() + 7 * 24 * 3600_000);
-    return { slots: calendar.freeSlots(req.userId, start, end) };
+    return { slots: await calendar.freeSlots(req.userId, start, end) };
   });
 
   app.get('/v1/schedule', { preHandler: app.authenticate }, async (req) => {
-    const rows = db
+    const rows = (await db
       .prepare(
         "SELECT * FROM schedule_blocks WHERE user_id = ? AND state != 'released' ORDER BY start_ts LIMIT 200",
       )
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       itemId: r.item_id,
@@ -195,9 +195,9 @@ export function registerCalendarRoutes(
   });
 
   app.get('/v1/activity', { preHandler: app.authenticate }, async (req) => {
-    const rows = db
+    const rows = (await db
       .prepare('SELECT * FROM activity WHERE user_id = ? ORDER BY created_at DESC LIMIT 100')
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       message: r.message,
@@ -210,9 +210,9 @@ export function registerCalendarRoutes(
   });
 
   app.get('/v1/reminders', { preHandler: app.authenticate }, async (req) => {
-    const rows = db
+    const rows = (await db
       .prepare('SELECT * FROM reminder_triggers WHERE user_id = ? ORDER BY fire_at LIMIT 100')
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       itemId: r.item_id,
@@ -226,7 +226,7 @@ export function registerCalendarRoutes(
   app.post('/v1/reminders/:id/snooze', { preHandler: app.authenticate }, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { minutes } = (req.body ?? {}) as { minutes?: number };
-    const ok = reminders.snooze(req.userId, id, Math.max(1, Math.min(minutes ?? 30, 24 * 60)));
+    const ok = await reminders.snooze(req.userId, id, Math.max(1, Math.min(minutes ?? 30, 24 * 60)));
     return ok ? { ok: true } : reply.code(404).send({ error: 'not found' });
   });
 }

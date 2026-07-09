@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('offline op replay is idempotent', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const ops = [
     {
@@ -36,7 +36,7 @@ test('offline op replay is idempotent', async () => {
 });
 
 test('completions always survive conflicting edits', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const t0 = Date.now();
   await ctx.app.inject({
@@ -59,7 +59,7 @@ test('completions always survive conflicting edits', async () => {
 });
 
 test('offline capture merges alongside concurrent online edits', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   // Online device creates an item.
   await ctx.app.inject({
@@ -91,7 +91,7 @@ test('offline capture merges alongside concurrent online edits', async () => {
 });
 
 test('LWW per field: stale edit does not overwrite newer edit', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const t0 = Date.now();
   await ctx.app.inject({
@@ -111,7 +111,7 @@ test('LWW per field: stale edit does not overwrite newer edit', async () => {
 });
 
 test('change feed delivers catch-up after offline period', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const before = await ctx.app.inject({
     method: 'GET',
@@ -145,7 +145,7 @@ test('change feed delivers catch-up after offline period', async () => {
 });
 
 test('subtask lifecycle syncs through ops', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',

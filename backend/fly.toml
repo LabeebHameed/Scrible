@@ -3,9 +3,10 @@
 # dependencies), so both live in the same build context. Deploy from here:
 # `cd backend && fly deploy` (this file is picked up automatically as ./fly.toml).
 #
-# SQLite lives on a persistent volume (node:sqlite writes a single file; this is
-# stateful, single-instance storage, not ephemeral container disk). Adjust `app`
-# (must be globally unique on Fly) and `primary_region` as needed.
+# Storage is a hosted Postgres (Neon/Supabase/Fly Postgres/etc.) via DATABASE_URL —
+# set as a secret (`fly secrets set DATABASE_URL=...`), not baked in here. No
+# persistent volume needed on this app at all; the database is external.
+# Adjust `app` (must be globally unique on Fly) and `primary_region` as needed.
 app = "scrible-api"
 primary_region = "iad"
 
@@ -14,11 +15,6 @@ primary_region = "iad"
 
 [env]
   PORT = "8787"
-  DATABASE_PATH = "/data/scrible.db"
-
-[mounts]
-  source = "scrible_data"
-  destination = "/data"
 
 [http_service]
   internal_port = 8787

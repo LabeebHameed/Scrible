@@ -33,9 +33,9 @@ export class CalendarService {
 
   // ---------- links ----------
 
-  createLink(userId: string, provider: string, accountId: string, tokens: string): string {
+  async createLink(userId: string, provider: string, accountId: string, tokens: string): Promise<string> {
     const id = randomUUID();
-    this.db
+    await this.db
       .prepare(
         'INSERT INTO calendar_links (id, user_id, provider, account_id, token_ref, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
@@ -43,10 +43,10 @@ export class CalendarService {
     return id;
   }
 
-  links(userId: string): CalendarLinkRef[] {
-    const rows = this.db
+  async links(userId: string): Promise<CalendarLinkRef[]> {
+    const rows = (await this.db
       .prepare('SELECT * FROM calendar_links WHERE user_id = ?')
-      .all(userId) as Array<Record<string, unknown>>;
+      .all(userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
       userId: String(r.user_id),
@@ -57,9 +57,9 @@ export class CalendarService {
     }));
   }
 
-  removeLink(userId: string, linkId: string): void {
-    this.db.prepare('DELETE FROM calendar_events WHERE calendar_link_id = ? AND user_id = ?').run(linkId, userId);
-    this.db.prepare('DELETE FROM calendar_links WHERE id = ? AND user_id = ?').run(linkId, userId);
+  async removeLink(userId: string, linkId: string): Promise<void> {
+    await this.db.prepare('DELETE FROM calendar_events WHERE calendar_link_id = ? AND user_id = ?').run(linkId, userId);
+    await this.db.prepare('DELETE FROM calendar_links WHERE id = ? AND user_id = ?').run(linkId, userId);
   }
 
   // ---------- two-way sync ----------
@@ -67,34 +67,34 @@ export class CalendarService {
   /** Pull external changes for every link; detect conflicts; cascade displaced blocks. */
   async syncUser(userId: string): Promise<void> {
     const now = Date.now();
-    for (const link of this.links(userId)) {
+    for (const link of await this.links(userId)) {
       const provider = this.registry.get(link.provider);
       const { events, syncState } = await provider.pullEvents(
         link,
         now - WINDOW_PAST_MS,
         now + WINDOW_FUTURE_MS,
       );
-      this.db
+      await this.db
         .prepare('UPDATE calendar_links SET sync_state = ? WHERE id = ?')
         .run(JSON.stringify(syncState), link.id);
 
       const scribleExternalIds = new Set(
         (
-          this.db
+          (await this.db
             .prepare('SELECT external_event_id FROM schedule_blocks WHERE user_id = ? AND external_event_id IS NOT NULL')
-            .all(userId) as Array<Record<string, unknown>>
+            .all(userId)) as Array<Record<string, unknown>>
         ).map((r) => String(r.external_event_id)),
       );
 
       for (const ev of events) {
         if (ev.deleted) {
-          this.db
+          await this.db
             .prepare('DELETE FROM calendar_events WHERE calendar_link_id = ? AND external_id = ?')
             .run(link.id, ev.externalId);
           continue;
         }
         const foreign = scribleExternalIds.has(ev.externalId) ? 0 : 1;
-        this.db
+        await this.db
           .prepare(
             `INSERT INTO calendar_events (id, user_id, calendar_link_id, external_id, title, start_ts, end_ts, busy, foreign_event, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -119,14 +119,14 @@ export class CalendarService {
       // events in-window that no longer exist upstream (reconciliation sweep).
       const upstreamIds = new Set(events.filter((e) => !e.deleted).map((e) => e.externalId));
       if (!('syncToken' in syncState) && !('deltaLink' in syncState)) {
-        const cached = this.db
+        const cached = (await this.db
           .prepare(
             'SELECT external_id FROM calendar_events WHERE calendar_link_id = ? AND start_ts < ? AND end_ts > ?',
           )
-          .all(link.id, now + WINDOW_FUTURE_MS, now - WINDOW_PAST_MS) as Array<Record<string, unknown>>;
+          .all(link.id, now + WINDOW_FUTURE_MS, now - WINDOW_PAST_MS)) as Array<Record<string, unknown>>;
         for (const row of cached) {
           if (!upstreamIds.has(String(row.external_id))) {
-            this.db
+            await this.db
               .prepare('DELETE FROM calendar_events WHERE calendar_link_id = ? AND external_id = ?')
               .run(link.id, String(row.external_id));
           }
@@ -138,20 +138,20 @@ export class CalendarService {
 
   /** A foreign busy event overlapping a Scrible block displaces the block. */
   private async cascadeConflicts(userId: string): Promise<void> {
-    const blocks = this.db
+    const blocks = (await this.db
       .prepare(
         "SELECT * FROM schedule_blocks WHERE user_id = ? AND state IN ('proposed','confirmed') AND end_ts > ?",
       )
-      .all(userId, Date.now()) as Array<Record<string, unknown>>;
+      .all(userId, Date.now())) as Array<Record<string, unknown>>;
     for (const block of blocks) {
-      const conflict = this.db
+      const conflict = (await this.db
         .prepare(
           `SELECT title FROM calendar_events WHERE user_id = ? AND foreign_event = 1 AND busy = 1
            AND start_ts < ? AND end_ts > ? LIMIT 1`,
         )
-        .get(userId, Number(block.end_ts), Number(block.start_ts)) as { title: string } | undefined;
+        .get(userId, Number(block.end_ts), Number(block.start_ts))) as { title: string } | undefined;
       if (!conflict) continue;
-      const item = this.sync.itemById(userId, String(block.item_id));
+      const item = await this.sync.itemById(userId, String(block.item_id));
       if (!item) continue;
       const moved = await this.placeBlock(userId, item, {
         excludeBlockId: String(block.id),
@@ -163,7 +163,7 @@ export class CalendarService {
           state: 'moved',
         });
       } else {
-        this.recordActivity(
+        await this.recordActivity(
           userId,
           `Your calendar filled up — couldn't find a new slot for "${item.title}". Pick a time?`,
           'conflict',
@@ -175,8 +175,8 @@ export class CalendarService {
 
   // ---------- availability ----------
 
-  freeSlots(userId: string, from: number, to: number, excludeBlockId?: string): FreeSlot[] {
-    const user = this.db.prepare('SELECT working_hours, timezone FROM users WHERE id = ?').get(userId) as
+  async freeSlots(userId: string, from: number, to: number, excludeBlockId?: string): Promise<FreeSlot[]> {
+    const user = (await this.db.prepare('SELECT working_hours, timezone FROM users WHERE id = ?').get(userId)) as
       | { working_hours: string; timezone: string }
       | undefined;
     const wh = JSON.parse(user?.working_hours ?? '{"start":9,"end":18,"days":[1,2,3,4,5]}') as {
@@ -186,17 +186,17 @@ export class CalendarService {
     };
 
     const busy: Array<{ start: number; end: number }> = [];
-    const events = this.db
+    const events = (await this.db
       .prepare(
         'SELECT start_ts, end_ts FROM calendar_events WHERE user_id = ? AND busy = 1 AND end_ts > ? AND start_ts < ?',
       )
-      .all(userId, from, to) as Array<Record<string, unknown>>;
+      .all(userId, from, to)) as Array<Record<string, unknown>>;
     for (const e of events) busy.push({ start: Number(e.start_ts), end: Number(e.end_ts) });
-    const blocks = this.db
+    const blocks = (await this.db
       .prepare(
         "SELECT id, start_ts, end_ts FROM schedule_blocks WHERE user_id = ? AND state IN ('proposed','confirmed','moved') AND end_ts > ? AND start_ts < ?",
       )
-      .all(userId, from, to) as Array<Record<string, unknown>>;
+      .all(userId, from, to)) as Array<Record<string, unknown>>;
     for (const b of blocks) {
       if (excludeBlockId && String(b.id) === excludeBlockId) continue;
       busy.push({ start: Number(b.start_ts), end: Number(b.end_ts) });
@@ -232,13 +232,13 @@ export class CalendarService {
     opts: { excludeBlockId?: string; notBefore?: number } = {},
   ): Promise<{ start: number; end: number; rationale: string } | null> {
     const from = Math.max(opts.notBefore ?? Date.now(), Date.now());
-    const slots = this.freeSlots(userId, from, from + 14 * 24 * 3600_000, opts.excludeBlockId);
+    const slots = await this.freeSlots(userId, from, from + 14 * 24 * 3600_000, opts.excludeBlockId);
     if (slots.length === 0) return null;
-    const user = this.db.prepare('SELECT working_hours, timezone FROM users WHERE id = ?').get(userId) as {
+    const user = (await this.db.prepare('SELECT working_hours, timezone FROM users WHERE id = ?').get(userId)) as {
       working_hours: string;
       timezone: string;
     };
-    const profile = loadEffectiveProfile(this.db, userId);
+    const profile = await loadEffectiveProfile(this.db, userId);
     try {
       return await this.orchestrator.run('schedule', {
         itemTitle: item.title,
@@ -261,16 +261,16 @@ export class CalendarService {
    * Default mode: auto-accept with easy undo (plan §7.4).
    */
   async autoSchedule(userId: string, itemId: string): Promise<void> {
-    const item = this.sync.itemById(userId, itemId);
+    const item = await this.sync.itemById(userId, itemId);
     if (!item || item.status === 'done') return;
-    const existing = this.db
+    const existing = await this.db
       .prepare("SELECT id FROM schedule_blocks WHERE item_id = ? AND state != 'released'")
       .get(itemId);
     if (existing) return;
 
     const placed = await this.placeBlock(userId, item, { notBefore: item.timeIntent?.at });
     if (!placed) {
-      this.recordActivity(
+      await this.recordActivity(
         userId,
         `Couldn't find a free slot for "${item.title}" in the next two weeks — your calendar is full.`,
         'conflict',
@@ -282,7 +282,7 @@ export class CalendarService {
     const blockId = randomUUID();
     let externalEventId: string | null = null;
     let linkId: string | null = null;
-    const [link] = this.links(userId);
+    const [link] = await this.links(userId);
     if (link) {
       try {
         externalEventId = await this.registry.get(link.provider).createEvent(link, {
@@ -297,22 +297,22 @@ export class CalendarService {
       }
     }
     const now = Date.now();
-    this.db
+    await this.db
       .prepare(
         `INSERT INTO schedule_blocks (id, user_id, item_id, start_ts, end_ts, state, calendar_link_id, external_event_id, rationale, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?)`,
       )
       .run(blockId, userId, itemId, placed.start, placed.end, linkId, externalEventId, placed.rationale, now, now);
 
-    this.sync.serverUpdateItem(userId, itemId, { status: 'scheduled', timeIntent: { ...(item.timeIntent ?? {}), at: placed.start } });
+    await this.sync.serverUpdateItem(userId, itemId, { status: 'scheduled', timeIntent: { ...(item.timeIntent ?? {}), at: placed.start } });
     const confirm = await this.orchestrator.run('confirm', {
       event: 'scheduled',
       itemTitle: item.title,
       itemType: item.type,
       detail: { when: formatWhen(placed.start), rationale: placed.rationale },
     });
-    this.recordActivity(userId, confirm.message, 'scheduled', { itemId, blockId, undoable: true });
-    this.sync.audit(userId, 'item.scheduled', 'schedule_block', blockId, { start: placed.start, end: placed.end }, true);
+    await this.recordActivity(userId, confirm.message, 'scheduled', { itemId, blockId, undoable: true });
+    await this.sync.audit(userId, 'item.scheduled', 'schedule_block', blockId, { start: placed.start, end: placed.end }, true);
   }
 
   async moveBlock(
@@ -322,16 +322,16 @@ export class CalendarService {
     end: number,
     opts: { reason?: string; state?: 'confirmed' | 'moved' } = {},
   ): Promise<void> {
-    const block = this.db
+    const block = (await this.db
       .prepare('SELECT * FROM schedule_blocks WHERE id = ? AND user_id = ?')
-      .get(blockId, userId) as Record<string, unknown> | undefined;
+      .get(blockId, userId)) as Record<string, unknown> | undefined;
     if (!block) return;
-    this.db
+    await this.db
       .prepare('UPDATE schedule_blocks SET start_ts = ?, end_ts = ?, state = ?, updated_at = ? WHERE id = ?')
       .run(start, end, opts.state ?? 'confirmed', Date.now(), blockId);
-    const item = this.sync.itemById(userId, String(block.item_id));
+    const item = await this.sync.itemById(userId, String(block.item_id));
     if (block.external_event_id && block.calendar_link_id) {
-      const link = this.links(userId).find((l) => l.id === String(block.calendar_link_id));
+      const link = (await this.links(userId)).find((l) => l.id === String(block.calendar_link_id));
       if (link) {
         try {
           await this.registry.get(link.provider).updateEvent(link, {
@@ -347,32 +347,32 @@ export class CalendarService {
       }
     }
     if (item) {
-      this.sync.serverUpdateItem(userId, item.id, { timeIntent: { ...(item.timeIntent ?? {}), at: start } });
+      await this.sync.serverUpdateItem(userId, item.id, { timeIntent: { ...(item.timeIntent ?? {}), at: start } });
       const confirm = await this.orchestrator.run('confirm', {
         event: 'moved',
         itemTitle: item.title,
         itemType: item.type,
         detail: { when: formatWhen(start), rationale: opts.reason },
       });
-      this.recordActivity(userId, confirm.message, 'moved', { itemId: item.id, blockId, undoable: true });
+      await this.recordActivity(userId, confirm.message, 'moved', { itemId: item.id, blockId, undoable: true });
     }
   }
 
   /** One-tap undo: release the block and remove it from the external calendar too. */
   async undoBlock(userId: string, blockId: string): Promise<boolean> {
-    const block = this.db
+    const block = (await this.db
       .prepare('SELECT * FROM schedule_blocks WHERE id = ? AND user_id = ?')
-      .get(blockId, userId) as Record<string, unknown> | undefined;
+      .get(blockId, userId)) as Record<string, unknown> | undefined;
     if (!block) return false;
-    this.db
+    await this.db
       .prepare("UPDATE schedule_blocks SET state = 'released', updated_at = ? WHERE id = ?")
       .run(Date.now(), blockId);
     if (block.external_event_id && block.calendar_link_id) {
-      const link = this.links(userId).find((l) => l.id === String(block.calendar_link_id));
+      const link = (await this.links(userId)).find((l) => l.id === String(block.calendar_link_id));
       if (link) {
         try {
           await this.registry.get(link.provider).deleteEvent(link, String(block.external_event_id));
-          this.db
+          await this.db
             .prepare('DELETE FROM calendar_events WHERE calendar_link_id = ? AND external_id = ?')
             .run(link.id, String(block.external_event_id));
         } catch {
@@ -380,10 +380,10 @@ export class CalendarService {
         }
       }
     }
-    const item = this.sync.itemById(userId, String(block.item_id));
+    const item = await this.sync.itemById(userId, String(block.item_id));
     if (item) {
-      this.sync.serverUpdateItem(userId, item.id, { status: 'active' });
-      this.recordActivity(userId, `Unscheduled "${item.title}" — it's back in your queue.`, 'unscheduled', {
+      await this.sync.serverUpdateItem(userId, item.id, { status: 'active' });
+      await this.recordActivity(userId, `Unscheduled "${item.title}" — it's back in your queue.`, 'unscheduled', {
         itemId: item.id,
         blockId,
         undoable: false,
@@ -394,12 +394,12 @@ export class CalendarService {
 
   // ---------- activity feed ----------
 
-  recordActivity(
+  async recordActivity(
     userId: string,
     message: string,
     kind: string,
     opts: { itemId?: string; blockId?: string; undoable?: boolean },
-  ): void {
+  ): Promise<void> {
     const id = randomUUID();
     const row = {
       id,
@@ -410,13 +410,13 @@ export class CalendarService {
       undoable: opts.undoable ?? false,
       createdAt: Date.now(),
     };
-    this.db
+    await this.db
       .prepare(
         'INSERT INTO activity (id, user_id, message, kind, item_id, block_id, undoable, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(id, userId, message, kind, row.itemId, row.blockId, row.undoable ? 1 : 0, row.createdAt);
     // Confirmations ride the same change feed the items do — never silent.
-    this.sync.recordChange(userId, 'activity', id, 'upsert', row);
+    await this.sync.recordChange(userId, 'activity', id, 'upsert', row);
   }
 }
 

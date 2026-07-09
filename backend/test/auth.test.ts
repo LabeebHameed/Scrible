@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('signup, login, me', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx, 'alice@test.dev');
 
   const me = await ctx.app.inject({ method: 'GET', url: '/v1/me', headers: auth(token) });
@@ -20,7 +20,7 @@ test('signup, login, me', async () => {
 });
 
 test('rejects wrong password and bad tokens', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   await signup(ctx, 'bob@test.dev');
 
   const bad = await ctx.app.inject({
@@ -42,7 +42,7 @@ test('rejects wrong password and bad tokens', async () => {
 });
 
 test('rejects weak passwords and duplicate accounts', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const weak = await ctx.app.inject({
     method: 'POST',
     url: '/v1/auth/signup',
@@ -60,7 +60,7 @@ test('rejects weak passwords and duplicate accounts', async () => {
 });
 
 test('per-user data isolation', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const a = await signup(ctx);
   const b = await signup(ctx);
   const created = await ctx.app.inject({

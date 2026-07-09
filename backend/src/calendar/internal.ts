@@ -12,11 +12,13 @@ export class InternalCalendarProvider implements CalendarProvider {
   /** link.id → events; module-level store so tests can inject "external" changes. */
   private calendars = new Map<string, Map<string, ExternalEvent>>();
 
-  constructor(private db: Db) {
-    // Rehydrate from the cache table so internal calendars survive restarts.
-    const rows = db
+  constructor(private db: Db) {}
+
+  /** Rehydrate from the cache table so internal calendars survive restarts. */
+  async init(): Promise<void> {
+    const rows = (await this.db
       .prepare("SELECT * FROM calendar_events WHERE id LIKE 'int-%'")
-      .all() as Array<Record<string, unknown>>;
+      .all()) as Array<Record<string, unknown>>;
     for (const r of rows) {
       this.upsertLocal(String(r.calendar_link_id), {
         externalId: String(r.external_id),

@@ -1,11 +1,30 @@
+import pg from 'pg';
 import { buildApp, type AppContext } from '../src/server.js';
 import { enableEnrichment } from '../src/enrichment.js';
 
 let counter = 0;
 
-export function testApp(flags?: Partial<AppContext['config']['flags']>): AppContext {
-  const ctx = buildApp({
-    databasePath: ':memory:',
+export const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/scrible_test';
+
+/**
+ * Full reset before every testApp() call — matches the old :memory:-per-call
+ * isolation. Exported for tests that call buildApp() directly (bypassing testApp())
+ * to pass extra Config overrides testApp()'s flags-only signature doesn't cover.
+ */
+export async function resetTestSchema(): Promise<void> {
+  const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL });
+  try {
+    await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  } finally {
+    await pool.end();
+  }
+}
+
+export async function testApp(flags?: Partial<AppContext['config']['flags']>): Promise<AppContext> {
+  await resetTestSchema();
+  const ctx = await buildApp({
+    databaseUrl: TEST_DATABASE_URL,
     jwtSecret: 'test-secret',
     flags: {
       autoClassify: false,

@@ -40,9 +40,9 @@ export interface AppContext {
   analytics: AnalyticsForwarder;
 }
 
-export function buildApp(overrides?: Partial<Config>): AppContext {
+export async function buildApp(overrides?: Partial<Config>): Promise<AppContext> {
   const config = { ...loadConfig(), ...overrides };
-  const db = openDb(config.databasePath);
+  const db = await openDb(config.databaseUrl);
   const app = Fastify({ logger: false });
   const sync = new SyncEngine(db);
   const orchestrator = buildOrchestrator(config, db);
@@ -51,8 +51,15 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   // Calendar providers (build plan §7.1). Google/Outlook re-encrypt refreshed tokens.
   const registry = new ProviderRegistry();
   const internalCalendar = new InternalCalendarProvider(db);
-  const persistTokens = (linkId: string, tokens: string) => {
-    db.prepare('UPDATE calendar_links SET token_ref = ? WHERE id = ?').run(encrypt(tokens), linkId);
+  await internalCalendar.init();
+  // Fire-and-forget from onTokensRefreshed (?.() is never awaited by callers) —
+  // swallow failures internally, matching the "retried by sweep" pattern elsewhere.
+  const persistTokens = async (linkId: string, tokens: string) => {
+    try {
+      await db.prepare('UPDATE calendar_links SET token_ref = ? WHERE id = ?').run(encrypt(tokens), linkId);
+    } catch {
+      /* best-effort; the next refresh will retry */
+    }
   };
   const google = new GoogleCalendarProvider();
   google.onTokensRefreshed = persistTokens;
@@ -90,18 +97,18 @@ export function buildApp(overrides?: Partial<Config>): AppContext {
   // and ideas get calendar blocks — async, confirmed in plain language, undoable.
   ctx.afterEnrichment = (userId, itemId) => {
     jobs.enqueue(async () => {
-      const item = sync.itemById(userId, itemId);
+      const item = await sync.itemById(userId, itemId);
       if (!item) return;
-      analytics.track(userId, 'item.created', { type: item.type, source: item.source, surface: 'web' });
+      await analytics.track(userId, 'item.created', { type: item.type, source: item.source, surface: 'web' });
       if (item.type === 'reminder' && item.timeIntent?.at) {
-        reminders.ensureTrigger(userId, itemId, item.timeIntent.at, item.timeIntent.recurrence);
+        await reminders.ensureTrigger(userId, itemId, item.timeIntent.at, item.timeIntent.recurrence);
         const confirm = await orchestrator.run('confirm', {
           event: 'reminder_set',
           itemTitle: item.title,
           itemType: item.type,
           detail: { when: new Date(item.timeIntent.at).toLocaleString() },
         });
-        calendar.recordActivity(userId, confirm.message, 'reminder_set', { itemId, undoable: false });
+        await calendar.recordActivity(userId, confirm.message, 'reminder_set', { itemId, undoable: false });
       } else if (item.type === 'idea' && config.flags.autoSchedule) {
         await calendar.autoSchedule(userId, itemId);
       }

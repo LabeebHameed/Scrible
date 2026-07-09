@@ -43,12 +43,12 @@ export class SyncEngine {
     }
   }
 
-  changesSince(userId: string, since: number, limit = 500): ChangeRow[] {
-    const rows = this.db
+  async changesSince(userId: string, since: number, limit = 500): Promise<ChangeRow[]> {
+    const rows = (await this.db
       .prepare(
         'SELECT seq, entity_type, entity_id, op, data, ts FROM changes WHERE user_id = ? AND seq > ? ORDER BY seq LIMIT ?',
       )
-      .all(userId, since, limit) as Array<Record<string, unknown>>;
+      .all(userId, since, limit)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       seq: Number(r.seq),
       entityType: String(r.entity_type),
@@ -60,21 +60,21 @@ export class SyncEngine {
   }
 
   /** Append an entity state to the change feed and notify live subscribers. */
-  recordChange(
+  async recordChange(
     userId: string,
     entityType: string,
     entityId: string,
     op: 'upsert' | 'delete',
     data: unknown,
-  ): ChangeRow {
+  ): Promise<ChangeRow> {
     const ts = Date.now();
-    const res = this.db
+    const res = await this.db
       .prepare(
-        'INSERT INTO changes (user_id, entity_type, entity_id, op, data, ts) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO changes (user_id, entity_type, entity_id, op, data, ts) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq',
       )
       .run(userId, entityType, entityId, op, data == null ? null : JSON.stringify(data), ts);
     const change: ChangeRow = {
-      seq: Number(res.lastInsertRowid),
+      seq: Number((res.rows[0] as { seq: number }).seq),
       entityType,
       entityId,
       op,
@@ -85,28 +85,28 @@ export class SyncEngine {
     return change;
   }
 
-  itemById(userId: string, id: string): Item | null {
-    const r = this.db
+  async itemById(userId: string, id: string): Promise<Item | null> {
+    const r = (await this.db
       .prepare('SELECT * FROM items WHERE id = ? AND user_id = ?')
-      .get(id, userId) as Record<string, unknown> | undefined;
+      .get(id, userId)) as Record<string, unknown> | undefined;
     return r ? rowToItem(r) : null;
   }
 
-  subtasksFor(userId: string, itemId: string): Subtask[] {
-    const rows = this.db
+  async subtasksFor(userId: string, itemId: string): Promise<Subtask[]> {
+    const rows = (await this.db
       .prepare('SELECT * FROM subtasks WHERE item_id = ? AND user_id = ? ORDER BY position')
-      .all(itemId, userId) as Array<Record<string, unknown>>;
+      .all(itemId, userId)) as Array<Record<string, unknown>>;
     return rows.map(rowToSubtask);
   }
 
   /** Apply a batch of client ops. Returns per-op status. */
-  applyOps(userId: string, ops: SyncOp[]): Array<{ opId: string; status: string }> {
+  async applyOps(userId: string, ops: SyncOp[]): Promise<Array<{ opId: string; status: string }>> {
     const results: Array<{ opId: string; status: string }> = [];
     const createdItems: string[] = [];
     for (const op of ops) {
-      const seen = this.db
+      const seen = (await this.db
         .prepare('SELECT result FROM processed_ops WHERE op_id = ? AND user_id = ?')
-        .get(op.opId, userId) as { result: string } | undefined;
+        .get(op.opId, userId)) as { result: string } | undefined;
       if (seen) {
         results.push({ opId: op.opId, status: 'duplicate' });
         continue;
@@ -117,11 +117,11 @@ export class SyncEngine {
       const clamped = { ...op, ts: Math.min(op.ts, Date.now() + 5 * 60_000) };
       let status: string;
       try {
-        status = this.applyOne(userId, clamped, createdItems);
+        status = await this.applyOne(userId, clamped, createdItems);
       } catch (err) {
         status = `error:${err instanceof Error ? err.message : 'unknown'}`;
       }
-      this.db
+      await this.db
         .prepare(
           'INSERT INTO processed_ops (op_id, user_id, result, created_at) VALUES (?, ?, ?, ?)',
         )
@@ -132,16 +132,16 @@ export class SyncEngine {
     return results;
   }
 
-  private applyOne(userId: string, op: SyncOp, createdItems: string[]): string {
+  private async applyOne(userId: string, op: SyncOp, createdItems: string[]): Promise<string> {
     const d = op.data ?? {};
     switch (op.kind) {
       case 'item.create': {
         // New captures always survive: id is client-generated; re-insert is a no-op.
-        if (this.itemById(userId, op.entityId)) return 'exists';
+        if (await this.itemById(userId, op.entityId)) return 'exists';
         const rawText = String(d.rawText ?? d.title ?? '');
         if (!rawText.trim()) return 'error:empty';
         const now = Date.now();
-        this.db
+        await this.db
           .prepare(
             `INSERT INTO items (id, user_id, type, source, raw_text, title, status, context_tag, app_trigger, time_intent, field_versions, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -161,13 +161,13 @@ export class SyncEngine {
             op.ts || now,
             op.ts || now,
           );
-        this.emitItem(userId, op.entityId);
+        await this.emitItem(userId, op.entityId);
         createdItems.push(op.entityId);
         return 'created';
       }
       case 'item.update':
       case 'item.retype': {
-        const item = this.rawItem(userId, op.entityId);
+        const item = await this.rawItem(userId, op.entityId);
         if (!item) return 'missing';
         const versions = JSON.parse(String(item.field_versions ?? '{}')) as Record<
           string,
@@ -212,19 +212,19 @@ export class SyncEngine {
         if (sets.length === 0) return 'stale';
         sets.push('field_versions = ?', 'updated_at = ?');
         vals.push(JSON.stringify(versions), Date.now());
-        this.db
+        await this.db
           .prepare(`UPDATE items SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`)
           .run(...vals, op.entityId, userId);
         // Context engine (Phase 8): teach only from the user's OWN corrections/edits,
         // never from our own server-originated updates (serverUpdateItem flags those).
         const isUserOrigin = d.origin !== 'server';
         if (op.kind === 'item.retype') {
-          this.audit(userId, 'classification.corrected', 'item', op.entityId, {
+          await this.audit(userId, 'classification.corrected', 'item', op.entityId, {
             from: item.type,
             to: d.type,
           });
-          if (isUserOrigin && applied.has('type') && hasConsent(this.db, userId, 'chat_import')) {
-            learnFromCorrection(this.db, userId, String(item.raw_text), item.type as ItemType, String(d.type) as ItemType);
+          if (isUserOrigin && applied.has('type') && (await hasConsent(this.db, userId, 'chat_import'))) {
+            await learnFromCorrection(this.db, userId, String(item.raw_text), item.type as ItemType, String(d.type) as ItemType);
           }
         }
         if (
@@ -232,55 +232,55 @@ export class SyncEngine {
           applied.has('appTrigger') &&
           typeof d.appTrigger === 'string' &&
           d.appTrigger &&
-          hasConsent(this.db, userId, 'chat_import')
+          (await hasConsent(this.db, userId, 'chat_import'))
         ) {
-          learnAppAlias(this.db, userId, String(item.raw_text), d.appTrigger);
+          await learnAppAlias(this.db, userId, String(item.raw_text), d.appTrigger);
         }
-        this.emitItem(userId, op.entityId);
+        await this.emitItem(userId, op.entityId);
         return 'updated';
       }
       case 'item.complete': {
-        const item = this.rawItem(userId, op.entityId);
+        const item = await this.rawItem(userId, op.entityId);
         if (!item) return 'missing';
         // Completions always survive conflicts — apply unconditionally.
-        this.db
+        await this.db
           .prepare(
             'UPDATE items SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?',
           )
           .run('done', op.ts || Date.now(), Date.now(), op.entityId, userId);
-        this.emitItem(userId, op.entityId);
+        await this.emitItem(userId, op.entityId);
         return 'completed';
       }
       case 'item.reopen': {
-        const item = this.rawItem(userId, op.entityId);
+        const item = await this.rawItem(userId, op.entityId);
         if (!item) return 'missing';
-        this.db
+        await this.db
           .prepare(
             'UPDATE items SET status = ?, completed_at = NULL, updated_at = ? WHERE id = ? AND user_id = ?',
           )
           .run('active', Date.now(), op.entityId, userId);
-        this.emitItem(userId, op.entityId);
+        await this.emitItem(userId, op.entityId);
         return 'reopened';
       }
       case 'item.delete': {
-        const item = this.rawItem(userId, op.entityId);
+        const item = await this.rawItem(userId, op.entityId);
         if (!item) return 'missing';
-        this.db.prepare('DELETE FROM reminder_triggers WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
-        this.db.prepare('DELETE FROM schedule_blocks WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
-        this.db.prepare('DELETE FROM subtasks WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
-        this.db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?').run(op.entityId, userId);
-        this.recordChange(userId, 'item', op.entityId, 'delete', null);
+        await this.db.prepare('DELETE FROM reminder_triggers WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
+        await this.db.prepare('DELETE FROM schedule_blocks WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
+        await this.db.prepare('DELETE FROM subtasks WHERE item_id = ? AND user_id = ?').run(op.entityId, userId);
+        await this.db.prepare('DELETE FROM items WHERE id = ? AND user_id = ?').run(op.entityId, userId);
+        await this.recordChange(userId, 'item', op.entityId, 'delete', null);
         return 'deleted';
       }
       case 'subtask.create': {
         const itemId = String(d.itemId ?? '');
-        if (!this.rawItem(userId, itemId)) return 'missing';
-        const exists = this.db
+        if (!(await this.rawItem(userId, itemId))) return 'missing';
+        const exists = await this.db
           .prepare('SELECT id FROM subtasks WHERE id = ?')
           .get(op.entityId);
         if (exists) return 'exists';
         const now = Date.now();
-        this.db
+        await this.db
           .prepare(
             `INSERT INTO subtasks (id, item_id, user_id, title, position, origin, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -295,25 +295,25 @@ export class SyncEngine {
             op.ts || now,
             op.ts || now,
           );
-        this.emitItem(userId, itemId);
+        await this.emitItem(userId, itemId);
         return 'created';
       }
       case 'subtask.update':
       case 'subtask.complete':
       case 'subtask.delete': {
-        const st = this.db
+        const st = (await this.db
           .prepare('SELECT * FROM subtasks WHERE id = ? AND user_id = ?')
-          .get(op.entityId, userId) as Record<string, unknown> | undefined;
+          .get(op.entityId, userId)) as Record<string, unknown> | undefined;
         if (!st) return 'missing';
         const itemId = String(st.item_id);
         if (op.kind === 'subtask.delete') {
-          this.db.prepare('DELETE FROM subtasks WHERE id = ?').run(op.entityId);
+          await this.db.prepare('DELETE FROM subtasks WHERE id = ?').run(op.entityId);
         } else if (op.kind === 'subtask.complete') {
-          this.db
+          await this.db
             .prepare('UPDATE subtasks SET completed_at = ?, updated_at = ? WHERE id = ?')
             .run(op.ts || Date.now(), Date.now(), op.entityId);
         } else {
-          this.db
+          await this.db
             .prepare('UPDATE subtasks SET title = ?, position = ?, updated_at = ? WHERE id = ?')
             .run(
               String(d.title ?? st.title),
@@ -322,7 +322,7 @@ export class SyncEngine {
               op.entityId,
             );
         }
-        this.emitItem(userId, itemId);
+        await this.emitItem(userId, itemId);
         return op.kind === 'subtask.delete' ? 'deleted' : 'updated';
       }
       default:
@@ -331,8 +331,8 @@ export class SyncEngine {
   }
 
   /** Server-originated item mutation (AI enrichment, scheduling) — same change path. */
-  serverUpdateItem(userId: string, itemId: string, fields: Record<string, unknown>): void {
-    this.applyOps(userId, [
+  async serverUpdateItem(userId: string, itemId: string, fields: Record<string, unknown>): Promise<void> {
+    await this.applyOps(userId, [
       {
         opId: randomUUID(),
         ts: Date.now(),
@@ -345,15 +345,15 @@ export class SyncEngine {
     ]);
   }
 
-  audit(
+  async audit(
     userId: string,
     action: string,
     entityType: string,
     entityId: string,
     detail: Record<string, unknown>,
     reversible = false,
-  ): void {
-    this.db
+  ): Promise<void> {
+    await this.db
       .prepare(
         'INSERT INTO audit_log (id, user_id, action, entity_type, entity_id, detail, reversible, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
@@ -369,17 +369,17 @@ export class SyncEngine {
       );
   }
 
-  private rawItem(userId: string, id: string): Record<string, unknown> | undefined {
-    return this.db
+  private async rawItem(userId: string, id: string): Promise<Record<string, unknown> | undefined> {
+    return (await this.db
       .prepare('SELECT * FROM items WHERE id = ? AND user_id = ?')
-      .get(id, userId) as Record<string, unknown> | undefined;
+      .get(id, userId)) as Record<string, unknown> | undefined;
   }
 
-  private emitItem(userId: string, itemId: string): void {
-    const item = this.itemById(userId, itemId);
+  private async emitItem(userId: string, itemId: string): Promise<void> {
+    const item = await this.itemById(userId, itemId);
     if (!item) return;
-    item.subtasks = this.subtasksFor(userId, itemId);
-    this.recordChange(userId, 'item', itemId, 'upsert', item);
+    item.subtasks = await this.subtasksFor(userId, itemId);
+    await this.recordChange(userId, 'item', itemId, 'upsert', item);
   }
 }
 

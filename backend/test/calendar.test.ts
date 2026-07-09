@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
-async function linkInternalCalendar(ctx: ReturnType<typeof testApp>, token: string): Promise<string> {
+async function linkInternalCalendar(ctx: Awaited<ReturnType<typeof testApp>>, token: string): Promise<string> {
   await ctx.app.inject({
     method: 'POST',
     url: '/v1/consents',
@@ -19,7 +19,7 @@ async function linkInternalCalendar(ctx: ReturnType<typeof testApp>, token: stri
 }
 
 test('calendar link requires consent', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const res = await ctx.app.inject({
     method: 'POST',
@@ -31,7 +31,7 @@ test('calendar link requires consent', async () => {
 });
 
 test('availability excludes busy events and respects working hours', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   const linkId = await linkInternalCalendar(ctx, token);
 
@@ -66,7 +66,7 @@ test('availability excludes busy events and respects working hours', async () =>
 });
 
 test('idea captured by voice lands as a calendar block with confirmation, undo removes it externally', async () => {
-  const ctx = testApp({ autoClassify: true, autoSchedule: true });
+  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
   const { token, userId } = await signup(ctx);
   const linkId = await linkInternalCalendar(ctx, token);
 
@@ -87,7 +87,7 @@ test('idea captured by voice lands as a calendar block with confirmation, undo r
   assert.equal(schedule[0].external, true, 'written to the linked calendar');
 
   // The block exists on the "external" calendar.
-  const link = ctx.calendar.links(userId)[0]!;
+  const link = (await ctx.calendar.links(userId))[0]!;
   const pulled = await ctx.internalCalendar.pullEvents(link, Date.now() - 1000, Date.now() + 30 * 86400000);
   assert.equal(pulled.events.length, 1);
   assert.match(pulled.events[0]!.title, /Scrible:/);
@@ -110,7 +110,7 @@ test('idea captured by voice lands as a calendar block with confirmation, undo r
 });
 
 test('external meeting landing on a Scrible block displaces it — never silently', async () => {
-  const ctx = testApp({ autoClassify: true, autoSchedule: true });
+  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
   const { token, userId } = await signup(ctx);
   const linkId = await linkInternalCalendar(ctx, token);
 
@@ -145,7 +145,7 @@ test('external meeting landing on a Scrible block displaces it — never silentl
 });
 
 test('scrible-owned events are never treated as foreign conflicts', async () => {
-  const ctx = testApp({ autoClassify: true, autoSchedule: true });
+  const ctx = await testApp({ autoClassify: true, autoSchedule: true });
   const { token, userId } = await signup(ctx);
   await linkInternalCalendar(ctx, token);
   await ctx.app.inject({

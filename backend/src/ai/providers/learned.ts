@@ -25,10 +25,10 @@ export function classifyLearned(db: Db) {
     if (!input.userId) throw new NotConfident();
     const base = classifyHeuristic(input);
 
-    const priors = typePriors(db, input.userId, input.text);
+    const priors = await typePriors(db, input.userId, input.text);
     const totalEvidence = priors.reduce((sum, p) => sum + Math.max(0, p.score), 0);
     const top = priors[0];
-    const alias = appAliasFor(db, input.userId, input.text);
+    const alias = await appAliasFor(db, input.userId, input.text);
 
     const typeConfident = !!top && top.score >= MIN_EVIDENCE && top.score / Math.max(totalEvidence, 1e-9) >= CONFIDENCE_THRESHOLD;
     if (!typeConfident && !alias) throw new NotConfident();
@@ -51,7 +51,7 @@ export function matchDoneLearned(db: Db) {
     const utterTokens = new Set(contentTokens(input.utterance));
     if (utterTokens.size === 0) throw new NotConfident();
 
-    const weights = keyWeights(db, input.userId);
+    const weights = await keyWeights(db, input.userId);
     const scored = input.openItems
       .map((it) => {
         const titleTokens = contentTokens(it.title);

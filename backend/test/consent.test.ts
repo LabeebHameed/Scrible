@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('consent grant, list, revoke lifecycle', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
 
   const initial = await ctx.app.inject({ method: 'GET', url: '/v1/consents', headers: auth(token) });
@@ -33,7 +33,7 @@ test('consent grant, list, revoke lifecycle', async () => {
 });
 
 test('revoking chat_import purges profile and import jobs', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -41,10 +41,10 @@ test('revoking chat_import purges profile and import jobs', async () => {
     headers: auth(token),
     payload: { category: 'chat_import', policyVersion: 'v1' },
   });
-  ctx.db
+  await ctx.db
     .prepare('INSERT INTO profiles (user_id, attributes, updated_at) VALUES (?, ?, ?)')
     .run(userId, '{"tone":"brief"}', Date.now());
-  ctx.db
+  await ctx.db
     .prepare(
       "INSERT INTO import_jobs (id, user_id, source, consent_id, retention_deadline, created_at) VALUES ('ij1', ?, 'claude', 'c1', ?, ?)",
     )
@@ -56,11 +56,11 @@ test('revoking chat_import purges profile and import jobs', async () => {
     headers: auth(token),
   });
   assert.deepEqual(revoke.json().purged, { profiles: 1, import_jobs: 1, learned_signals: 0 });
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM profiles').get()!.c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM profiles').get()) as { c: number }).c, 0);
 });
 
 test('unknown category rejected', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const res = await ctx.app.inject({
     method: 'POST',

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('capture is classified, decomposed, and summarized asynchronously', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
 
   const created = await ctx.app.inject({
@@ -27,7 +27,7 @@ test('capture is classified, decomposed, and summarized asynchronously', async (
 });
 
 test('long multi-part task gets decomposed; small item does not', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
 
   await ctx.app.inject({
@@ -57,7 +57,7 @@ test('long multi-part task gets decomposed; small item does not', async () => {
 });
 
 test('computer-action tasks get the context tag for Phase 3 routing', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -71,7 +71,7 @@ test('computer-action tasks get the context tag for Phase 3 routing', async () =
 });
 
 test('spoken done completes the matching item', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -100,7 +100,7 @@ test('spoken done completes the matching item', async () => {
 });
 
 test('spoken done with no match does not complete anything', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -118,7 +118,7 @@ test('spoken done with no match does not complete anything', async () => {
 });
 
 test('queue orders explicit times first', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',

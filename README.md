@@ -11,7 +11,7 @@ architecture decisions in [docs/decisions/](docs/decisions/).
 
 | Package | What it is |
 |---|---|
-| `backend/` | System of record: auth, items, sync, consent, AI orchestration, scheduling, notifications (TypeScript / Fastify / SQLite-dev → Postgres-prod) |
+| `backend/` | System of record: auth, items, sync, consent, AI orchestration, scheduling, notifications (TypeScript / Fastify / Postgres) |
 | `app/` | Client app: Expo (React Native) for iOS/Android; the web build doubles as the web dashboard. `npm run web -w app` to run; native voice capture needs a dev build (`expo-speech-recognition`), Expo Go falls back to typed input |
 | `extension/` | Chrome MV3 extension for computer-action reminders |
 | `desktop/` | Tauri 2 tray app: background app-launch watcher with local-only matching (`desktop/README.md`) |
@@ -24,11 +24,16 @@ npm install          # workspaces
 npm run typecheck    # all packages
 npm test             # all packages
 
-# run the backend (defaults: port 8787, scrible.db, dev JWT secret)
+# run the backend (defaults: port 8787, local Postgres, dev JWT secret)
 npm run dev -w backend
 ```
 
-Environment: `PORT`, `DATABASE_PATH`, `JWT_SECRET` (required in production), `FLAG_*`
+Backend storage is Postgres — set `DATABASE_URL` (defaults to
+`postgresql://postgres:postgres@localhost:5432/scrible_dev` for local dev; required
+in production, same throw-if-missing pattern as `JWT_SECRET`). Any Postgres works:
+a local install, or a free hosted one (Neon, Supabase).
+
+Environment: `PORT`, `DATABASE_URL`, `JWT_SECRET` (required in production), `FLAG_*`
 feature flags. AI is free-tier-first and fully optional (docs/AI-MAP.md): without any
 key, every capability runs on deterministic heuristics — never fails, never costs
 anything. `NVIDIA_API_KEY` (optional) enables the primary free-tier LLM tier via

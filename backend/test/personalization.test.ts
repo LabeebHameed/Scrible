@@ -53,7 +53,7 @@ test('parsers extract only user messages per format', () => {
 });
 
 test('import requires chat_import consent', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const res = await ctx.app.inject({
     method: 'POST',
@@ -65,7 +65,7 @@ test('import requires chat_import consent', async () => {
 });
 
 test('claude import derives a profile; raw is never retained', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -85,14 +85,14 @@ test('claude import derives a profile; raw is never retained', async () => {
   assert.match(res.json().rawRetention, /discarded/);
 
   // Job row records counts only; raw_ref empty, deletion timestamped.
-  const job = ctx.db.prepare('SELECT * FROM import_jobs WHERE user_id = ?').get(userId) as Record<string, unknown>;
+  const job = (await ctx.db.prepare('SELECT * FROM import_jobs WHERE user_id = ?').get(userId)) as Record<string, unknown>;
   assert.equal(job.state, 'done');
   assert.equal(job.raw_ref, null);
   assert.ok(job.deleted_at);
 
   // Nothing in the database contains the conversation text.
   for (const table of ['profiles', 'import_jobs', 'audit_log', 'activity']) {
-    const rows = ctx.db.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>;
+    const rows = (await ctx.db.prepare(`SELECT * FROM ${table}`).all()) as Array<Record<string, unknown>>;
     for (const row of rows) {
       assert.ok(!JSON.stringify(row).includes('roadmap deck'), `${table} must not contain chat text`);
     }
@@ -104,7 +104,7 @@ test('claude import derives a profile; raw is never retained', async () => {
 });
 
 test('manual edits win over derived values and survive re-import', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -141,7 +141,7 @@ test('manual edits win over derived values and survive re-import', async () => {
 });
 
 test('profile adapts confirmations: brief tone produces brief summaries', async () => {
-  const ctx = testApp({ autoClassify: true, personalization: true });
+  const ctx = await testApp({ autoClassify: true, personalization: true });
   const { token, userId } = await signup(ctx);
   ctx.db
     .prepare('INSERT INTO profiles (user_id, attributes, updated_at) VALUES (?, ?, ?)')
@@ -159,7 +159,7 @@ test('profile adapts confirmations: brief tone produces brief summaries', async 
 });
 
 test('total deletion: no import-derived data survives', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -178,10 +178,12 @@ test('total deletion: no import-derived data survives', async () => {
   assert.equal(res.json().deleted, true);
   assert.match(res.json().confirmation, /deleted/);
 
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM profiles WHERE user_id = ?').get(userId)!.c, 0);
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM import_jobs WHERE user_id = ?').get(userId)!.c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM profiles WHERE user_id = ?').get(userId)) as { c: number }).c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM import_jobs WHERE user_id = ?').get(userId)) as { c: number }).c, 0);
   assert.equal(
-    ctx.db.prepare("SELECT COUNT(*) c FROM audit_log WHERE user_id = ? AND action LIKE 'import.%'").get(userId)!.c,
+    ((await ctx.db.prepare("SELECT COUNT(*) c FROM audit_log WHERE user_id = ? AND action LIKE 'import.%'").get(userId)) as {
+      c: number;
+    }).c,
     0,
     'processing logs erased',
   );
@@ -190,7 +192,7 @@ test('total deletion: no import-derived data survives', async () => {
 });
 
 test('revoking chat_import consent also purges profile and imports', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -205,12 +207,12 @@ test('revoking chat_import consent also purges profile and imports', async () =>
     payload: { source: 'claude', content: CLAUDE_EXPORT },
   });
   await ctx.app.inject({ method: 'POST', url: '/v1/consents/chat_import/revoke', headers: auth(token) });
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM profiles WHERE user_id = ?').get(userId)!.c, 0);
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM import_jobs WHERE user_id = ?').get(userId)!.c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM profiles WHERE user_id = ?').get(userId)) as { c: number }).c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM import_jobs WHERE user_id = ?').get(userId)) as { c: number }).c, 0);
 });
 
 test('on-device path stores a client-derived profile without any upload', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',

@@ -15,15 +15,15 @@ export function enableEnrichment(ctx: AppContext): void {
 
   sync.onItemCreated = (userId, itemId) => {
     jobs.enqueue(async () => {
-      const item = sync.itemById(userId, itemId);
+      const item = await sync.itemById(userId, itemId);
       if (!item || item.status !== 'captured') return; // user already typed it or acted
-      sync.serverUpdateItem(userId, itemId, { status: 'processing' });
+      await sync.serverUpdateItem(userId, itemId, { status: 'processing' });
 
       // Multi-item utterance: split before classification; the original item keeps
       // the first part, each extra part becomes its own item (enriched in turn).
       const parts = splitUtterance(item.rawText);
       if (parts.length > 1) {
-        sync.serverUpdateItem(userId, itemId, { rawText: parts[0], title: parts[0] });
+        await sync.serverUpdateItem(userId, itemId, { rawText: parts[0], title: parts[0] });
         const extraOps = parts.slice(1).map((part) => ({
           opId: randomUUID(),
           ts: Date.now(),
@@ -31,23 +31,23 @@ export function enableEnrichment(ctx: AppContext): void {
           entityId: randomUUID(),
           data: { rawText: part, source: item.source },
         }));
-        sync.applyOps(userId, extraOps);
-        sync.audit(userId, 'item.split', 'item', itemId, { parts: parts.length }, false);
+        await sync.applyOps(userId, extraOps);
+        await sync.audit(userId, 'item.split', 'item', itemId, { parts: parts.length }, false);
         // Reload with the trimmed text before classifying.
-        const updated = sync.itemById(userId, itemId);
+        const updated = await sync.itemById(userId, itemId);
         if (!updated) return;
         item.rawText = updated.rawText;
       }
 
-      const user = db.prepare('SELECT timezone FROM users WHERE id = ?').get(userId) as
+      const user = (await db.prepare('SELECT timezone FROM users WHERE id = ?').get(userId)) as
         | { timezone: string }
         | undefined;
-      const recent = db
+      const recent = (await db
         .prepare(
           "SELECT type FROM items WHERE user_id = ? AND id != ? ORDER BY created_at DESC LIMIT 5",
         )
-        .all(userId, itemId) as Array<{ type: ItemType }>;
-      const profile = loadProfile(ctx, userId);
+        .all(userId, itemId)) as Array<{ type: ItemType }>;
+      const profile = await loadProfile(ctx, userId);
 
       const cls = await orchestrator.run('classify', {
         userId,
@@ -75,7 +75,7 @@ export function enableEnrichment(ctx: AppContext): void {
         entityId: randomUUID(),
         data: { itemId, title, position: position++, origin: 'ai' },
       }));
-      sync.applyOps(userId, subtaskOps);
+      await sync.applyOps(userId, subtaskOps);
 
       const confirm = await orchestrator.run('confirm', {
         event: 'captured',
@@ -85,7 +85,7 @@ export function enableEnrichment(ctx: AppContext): void {
         profile,
       });
 
-      sync.serverUpdateItem(userId, itemId, {
+      await sync.serverUpdateItem(userId, itemId, {
         type: cls.type,
         title: cls.title,
         confidence: cls.confidence,
@@ -95,7 +95,7 @@ export function enableEnrichment(ctx: AppContext): void {
         summary: confirm.message,
         status: 'active',
       });
-      sync.audit(
+      await sync.audit(
         userId,
         'item.classified',
         'item',
@@ -108,7 +108,7 @@ export function enableEnrichment(ctx: AppContext): void {
   };
 }
 
-function loadProfile(ctx: AppContext, userId: string) {
+async function loadProfile(ctx: AppContext, userId: string) {
   if (!ctx.config.flags.personalization) return null;
   return loadEffectiveProfile(ctx.db, userId);
 }

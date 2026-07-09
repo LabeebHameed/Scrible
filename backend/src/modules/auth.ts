@@ -36,7 +36,7 @@ export function registerAuth(app: FastifyInstance, db: Db, jwtSecret: string): v
       await reply.code(401).send({ error: 'unauthorized' });
       return;
     }
-    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(payload.sub);
+    const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(payload.sub);
     if (!user) {
       await reply.code(401).send({ error: 'unauthorized' });
       return;
@@ -56,10 +56,10 @@ export function registerAuth(app: FastifyInstance, db: Db, jwtSecret: string): v
     if (!password || password.length < 8) {
       return reply.code(400).send({ error: 'password must be at least 8 characters' });
     }
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
     if (existing) return reply.code(409).send({ error: 'account exists' });
     const id = randomUUID();
-    db.prepare(
+    await db.prepare(
       'INSERT INTO users (id, email, password_hash, timezone, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run(id, email.toLowerCase(), hashPassword(password), timezone ?? 'UTC', Date.now());
     const token = signToken({ sub: id }, jwtSecret);
@@ -68,9 +68,9 @@ export function registerAuth(app: FastifyInstance, db: Db, jwtSecret: string): v
 
   app.post('/v1/auth/login', async (req, reply) => {
     const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
-    const row = db
+    const row = (await db
       .prepare('SELECT id, password_hash FROM users WHERE email = ?')
-      .get((email ?? '').toLowerCase()) as { id: string; password_hash: string } | undefined;
+      .get((email ?? '').toLowerCase())) as { id: string; password_hash: string } | undefined;
     if (!row || !password || !verifyPassword(password, row.password_hash)) {
       return reply.code(401).send({ error: 'invalid credentials' });
     }
@@ -86,9 +86,9 @@ export function registerAuth(app: FastifyInstance, db: Db, jwtSecret: string): v
   );
 
   app.get('/v1/me', { preHandler: app.authenticate }, async (req) => {
-    const u = db
+    const u = (await db
       .prepare('SELECT id, email, timezone, working_hours, notification_prefs, created_at FROM users WHERE id = ?')
-      .get(req.userId) as Record<string, unknown>;
+      .get(req.userId)) as Record<string, unknown>;
     return {
       id: u.id,
       email: u.email,
@@ -102,16 +102,16 @@ export function registerAuth(app: FastifyInstance, db: Db, jwtSecret: string): v
   app.patch('/v1/me', { preHandler: app.authenticate }, async (req) => {
     const { timezone, workingHours, notificationPrefs } = (req.body ?? {}) as Record<string, unknown>;
     if (typeof timezone === 'string') {
-      db.prepare('UPDATE users SET timezone = ? WHERE id = ?').run(timezone, req.userId);
+      await db.prepare('UPDATE users SET timezone = ? WHERE id = ?').run(timezone, req.userId);
     }
     if (workingHours && typeof workingHours === 'object') {
-      db.prepare('UPDATE users SET working_hours = ? WHERE id = ?').run(
+      await db.prepare('UPDATE users SET working_hours = ? WHERE id = ?').run(
         JSON.stringify(workingHours),
         req.userId,
       );
     }
     if (notificationPrefs && typeof notificationPrefs === 'object') {
-      db.prepare('UPDATE users SET notification_prefs = ? WHERE id = ?').run(
+      await db.prepare('UPDATE users SET notification_prefs = ? WHERE id = ?').run(
         JSON.stringify(notificationPrefs),
         req.userId,
       );

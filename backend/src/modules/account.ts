@@ -8,7 +8,7 @@ import { deleteAllUserData } from '../lib/db.js';
 
 export function registerAccount(app: FastifyInstance, db: Db): void {
   app.delete('/v1/me', { preHandler: app.authenticate }, async (req) => {
-    const counts = deleteAllUserData(db, req.userId);
+    const counts = await deleteAllUserData(db, req.userId);
     return {
       deleted: true,
       // User-visible confirmation of total deletion (plan §4): live stores now,
@@ -20,11 +20,11 @@ export function registerAccount(app: FastifyInstance, db: Db): void {
   });
 
   app.get('/v1/audit', { preHandler: app.authenticate }, async (req) => {
-    const rows = db
+    const rows = (await db
       .prepare(
         'SELECT id, action, entity_type, entity_id, detail, reversible, created_at FROM audit_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
       )
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       action: r.action,

@@ -19,11 +19,11 @@ export function registerVoice(
     const { utterance } = (req.body ?? {}) as { utterance?: string };
     if (!utterance?.trim()) return reply.code(400).send({ error: 'utterance required' });
 
-    const rows = db
+    const rows = (await db
       .prepare(
         "SELECT * FROM items WHERE user_id = ? AND status IN ('captured','processing','active','scheduled') ORDER BY created_at DESC LIMIT 50",
       )
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     const open = rows.map(rowToItem);
 
     const match = await orchestrator.run('matchDone', {
@@ -33,10 +33,10 @@ export function registerVoice(
     });
 
     if (match.matchedId) {
-      sync.applyOps(req.userId, [
+      await sync.applyOps(req.userId, [
         { opId: randomUUID(), ts: Date.now(), kind: 'item.complete', entityId: match.matchedId },
       ]);
-      const item = sync.itemById(req.userId, match.matchedId)!;
+      const item = (await sync.itemById(req.userId, match.matchedId))!;
       const confirm = await orchestrator.run('confirm', {
         event: 'completed',
         itemTitle: item.title,

@@ -1,10 +1,95 @@
 /**
- * Data layer. SQLite via the Node built-in for dev/test; the schema is written in
- * portable SQL so production swaps this module for a Postgres pool (ADR 0001 §3).
+ * Data layer — Postgres (ADR 0001 §3: the schema was written in portable SQL from
+ * day one specifically so this swap would be a single-module change). `Db` wraps a
+ * `pg.Pool` behind the same `.prepare(sql).get/all/run(...)` shape the rest of the
+ * codebase already used against `node:sqlite`, so callers only needed `await` added
+ * — not a query rewrite. `?` placeholders are translated to Postgres's `$1..$n`
+ * positionally; every query in this codebase is a static first-party string, never
+ * user-supplied SQL, so that translation is safe.
  */
-import { DatabaseSync } from 'node:sqlite';
+import pg from 'pg';
 
-export type Db = DatabaseSync;
+// pg returns BIGINT (OID 20) as strings by default, to avoid silently truncating
+// values beyond Number.MAX_SAFE_INTEGER. Every BIGINT column here is an epoch-ms
+// timestamp or an identity sequence — both comfortably within safe-integer range —
+// and the rest of the codebase expects plain JS numbers (arithmetic, Date, JSON),
+// so parse BIGINT as a number globally rather than converting at every call site.
+pg.types.setTypeParser(20, (val: string) => Number(val));
+
+export interface RunResult {
+  changes: number;
+  rows: unknown[];
+}
+
+export interface PreparedStatement {
+  get(...args: unknown[]): Promise<unknown>;
+  all(...args: unknown[]): Promise<unknown[]>;
+  run(...args: unknown[]): Promise<RunResult>;
+}
+
+/** Translate `?` positional placeholders to `$1..$n`, skipping `?` inside string literals. */
+function toPositional(sql: string): string {
+  let out = '';
+  let inString = false;
+  let n = 0;
+  for (const ch of sql) {
+    if (ch === "'") inString = !inString;
+    if (ch === '?' && !inString) {
+      n += 1;
+      out += `$${n}`;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+class PgDb {
+  constructor(private pool: pg.Pool) {}
+
+  prepare(sql: string): PreparedStatement {
+    const text = toPositional(sql);
+    const query = async (args: unknown[]) => this.pool.query(text, args);
+    return {
+      async get(...args) {
+        const res = await query(args);
+        return res.rows[0];
+      },
+      async all(...args) {
+        const res = await query(args);
+        return res.rows;
+      },
+      async run(...args) {
+        const res = await query(args);
+        return { changes: res.rowCount ?? 0, rows: res.rows };
+      },
+    };
+  }
+
+  /** Multi-statement raw SQL (schema/migrations) — no params, simple query protocol. */
+  async exec(sql: string): Promise<void> {
+    await this.pool.query(sql);
+  }
+
+  /** Runs `fn` against a single checked-out connection wrapped in BEGIN/COMMIT/ROLLBACK. */
+  async transaction<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    const scoped = new PgDb({ query: client.query.bind(client) } as unknown as pg.Pool);
+    try {
+      await client.query('BEGIN');
+      const result = await fn(scoped);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+export type Db = PgDb;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -14,7 +99,7 @@ CREATE TABLE IF NOT EXISTS users (
   timezone TEXT NOT NULL DEFAULT 'UTC',
   working_hours TEXT NOT NULL DEFAULT '{"start":9,"end":18,"days":[1,2,3,4,5]}',
   notification_prefs TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS consents (
@@ -23,7 +108,8 @@ CREATE TABLE IF NOT EXISTS consents (
   category TEXT NOT NULL,
   policy_version TEXT NOT NULL,
   granted INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL,
+  seq BIGINT GENERATED ALWAYS AS IDENTITY
 );
 CREATE INDEX IF NOT EXISTS idx_consents_user ON consents(user_id, category, created_at);
 
@@ -41,9 +127,9 @@ CREATE TABLE IF NOT EXISTS items (
   time_intent TEXT,
   summary TEXT,
   field_versions TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  completed_at INTEGER
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  completed_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_items_user ON items(user_id, status, created_at);
 
@@ -54,9 +140,9 @@ CREATE TABLE IF NOT EXISTS subtasks (
   title TEXT NOT NULL,
   position INTEGER NOT NULL DEFAULT 0,
   origin TEXT NOT NULL DEFAULT 'user',
-  completed_at INTEGER,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  completed_at BIGINT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_subtasks_item ON subtasks(item_id, position);
 
@@ -65,14 +151,14 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   user_id TEXT NOT NULL REFERENCES users(id),
   item_id TEXT NOT NULL REFERENCES items(id),
   subtask_id TEXT,
-  start_ts INTEGER NOT NULL,
-  end_ts INTEGER NOT NULL,
+  start_ts BIGINT NOT NULL,
+  end_ts BIGINT NOT NULL,
   state TEXT NOT NULL DEFAULT 'proposed',
   calendar_link_id TEXT,
   external_event_id TEXT,
   rationale TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_user ON schedule_blocks(user_id, start_ts);
 
@@ -80,14 +166,14 @@ CREATE TABLE IF NOT EXISTS reminder_triggers (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id),
   item_id TEXT NOT NULL REFERENCES items(id),
-  fire_at INTEGER NOT NULL,
+  fire_at BIGINT NOT NULL,
   recurrence TEXT,
   channels TEXT NOT NULL DEFAULT '["push"]',
-  snoozed_until INTEGER,
-  delivered_at INTEGER,
-  seen_at INTEGER,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  snoozed_until BIGINT,
+  delivered_at BIGINT,
+  seen_at BIGINT,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminder_triggers(fire_at, delivered_at);
 
@@ -97,8 +183,8 @@ CREATE TABLE IF NOT EXISTS devices (
   platform TEXT NOT NULL,
   push_token TEXT,
   capabilities TEXT NOT NULL DEFAULT '{}',
-  last_seen INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
+  last_seen BIGINT NOT NULL,
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
 
@@ -110,7 +196,7 @@ CREATE TABLE IF NOT EXISTS calendar_links (
   token_ref TEXT NOT NULL,
   selected_calendars TEXT NOT NULL DEFAULT '[]',
   sync_state TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS profiles (
@@ -118,7 +204,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   attributes TEXT NOT NULL DEFAULT '{}',
   sources TEXT NOT NULL DEFAULT '[]',
   storage TEXT NOT NULL DEFAULT 'server',
-  updated_at INTEGER NOT NULL
+  updated_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS import_jobs (
@@ -127,10 +213,10 @@ CREATE TABLE IF NOT EXISTS import_jobs (
   source TEXT NOT NULL,
   consent_id TEXT NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
-  retention_deadline INTEGER NOT NULL,
+  retention_deadline BIGINT NOT NULL,
   raw_ref TEXT,
-  deleted_at INTEGER,
-  created_at INTEGER NOT NULL
+  deleted_at BIGINT,
+  created_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS calendar_events (
@@ -139,11 +225,11 @@ CREATE TABLE IF NOT EXISTS calendar_events (
   calendar_link_id TEXT NOT NULL,
   external_id TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
-  start_ts INTEGER NOT NULL,
-  end_ts INTEGER NOT NULL,
+  start_ts BIGINT NOT NULL,
+  end_ts BIGINT NOT NULL,
   busy INTEGER NOT NULL DEFAULT 1,
   foreign_event INTEGER NOT NULL DEFAULT 1,
-  updated_at INTEGER NOT NULL
+  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cal_events_user ON calendar_events(user_id, start_ts);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cal_events_ext ON calendar_events(calendar_link_id, external_id);
@@ -156,7 +242,7 @@ CREATE TABLE IF NOT EXISTS activity (
   item_id TEXT,
   block_id TEXT,
   undoable INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_activity_user ON activity(user_id, created_at);
 
@@ -168,7 +254,7 @@ CREATE TABLE IF NOT EXISTS push_outbox (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   dedup_key TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_push_dedup ON push_outbox(user_id, dedup_key);
 
@@ -180,25 +266,25 @@ CREATE TABLE IF NOT EXISTS audit_log (
   entity_id TEXT NOT NULL,
   detail TEXT NOT NULL DEFAULT '{}',
   reversible INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS changes (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  seq BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id TEXT NOT NULL,
   entity_type TEXT NOT NULL,
   entity_id TEXT NOT NULL,
   op TEXT NOT NULL,
   data TEXT,
-  ts INTEGER NOT NULL
+  ts BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_changes_user ON changes(user_id, seq);
 
 CREATE TABLE IF NOT EXISTS analytics_ids (
   user_id TEXT PRIMARY KEY,
   pseudo_id TEXT NOT NULL UNIQUE,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 
 -- Deliberately NO user_id column: events are keyed by pseudo_id only, so erasing
@@ -209,7 +295,7 @@ CREATE TABLE IF NOT EXISTS analytics_events (
   event TEXT NOT NULL,
   props TEXT NOT NULL DEFAULT '{}',
   schema_version TEXT NOT NULL,
-  ts INTEGER NOT NULL
+  ts BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_analytics_events ON analytics_events(event, ts);
 
@@ -222,7 +308,7 @@ CREATE TABLE IF NOT EXISTS learned_signals (
   key TEXT NOT NULL,
   value TEXT NOT NULL,
   weight REAL NOT NULL,
-  updated_at INTEGER NOT NULL,
+  updated_at BIGINT NOT NULL,
   UNIQUE(user_id, kind, key, value)
 );
 CREATE INDEX IF NOT EXISTS idx_learned_user ON learned_signals(user_id, kind, key);
@@ -231,7 +317,7 @@ CREATE TABLE IF NOT EXISTS processed_ops (
   op_id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   result TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at BIGINT NOT NULL
 );
 `;
 
@@ -257,18 +343,16 @@ export const USER_DATA_TABLES = [
   'users',
 ] as const;
 
-export function openDb(path: string): Db {
-  const db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA foreign_keys = ON;');
-  db.exec(SCHEMA);
-  // Additive migrations for pre-existing dev databases (CREATE TABLE IF NOT EXISTS
-  // won't alter an existing table).
-  try {
-    db.exec('ALTER TABLE items ADD COLUMN app_trigger TEXT');
-  } catch {
-    /* column already exists */
-  }
+export async function openDb(connectionString: string): Promise<Db> {
+  const pool = new pg.Pool({
+    connectionString,
+    ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+  });
+  const db = new PgDb(pool);
+  await db.exec(SCHEMA);
+  // Additive migration for pre-existing databases (CREATE TABLE IF NOT EXISTS won't
+  // alter an existing table); Postgres's IF NOT EXISTS makes this idempotent natively.
+  await db.exec('ALTER TABLE items ADD COLUMN IF NOT EXISTS app_trigger TEXT');
   return db;
 }
 
@@ -276,29 +360,26 @@ export function openDb(path: string): Db {
  * DSR verification: proves no row referencing the user survives in any user-data
  * table. Returns per-table residual counts (all zero after a correct deletion).
  */
-export function verifyDeletion(db: Db, userId: string): Record<string, number> {
+export async function verifyDeletion(db: Db, userId: string): Promise<Record<string, number>> {
   const residuals: Record<string, number> = {};
   for (const table of USER_DATA_TABLES) {
     const col = table === 'users' ? 'id' : 'user_id';
-    const row = db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`).get(userId) as { c: number };
+    const row = (await db.prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`).get(userId)) as {
+      c: string | number;
+    };
     residuals[table] = Number(row.c);
   }
   return residuals;
 }
 
-export function deleteAllUserData(db: Db, userId: string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  db.exec('BEGIN');
-  try {
+export async function deleteAllUserData(db: Db, userId: string): Promise<Record<string, number>> {
+  return db.transaction(async (tx) => {
+    const counts: Record<string, number> = {};
     for (const table of USER_DATA_TABLES) {
       const col = table === 'users' ? 'id' : 'user_id';
-      const res = db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(userId);
+      const res = await tx.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(userId);
       counts[table] = Number(res.changes);
     }
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
-  return counts;
+    return counts;
+  });
 }

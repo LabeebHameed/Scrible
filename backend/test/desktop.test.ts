@@ -15,7 +15,7 @@ test('parseAppTrigger extracts explicit app-launch phrasing only', () => {
 });
 
 test('capture with app phrasing gets appTrigger + computer-action tag', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -30,7 +30,7 @@ test('capture with app phrasing gets appTrigger + computer-action tag', async ()
 });
 
 test('desktop checkin returns only open app-triggered items; completion withdraws them', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -77,7 +77,7 @@ test('desktop checkin returns only open app-triggered items; completion withdraw
 });
 
 test('appTrigger can be set and cleared manually and syncs like any field', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -105,7 +105,7 @@ test('appTrigger can be set and cleared manually and syncs like any field', asyn
 });
 
 test('app_watcher consent grant/revoke roundtrip', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const grant = await ctx.app.inject({
     method: 'POST',

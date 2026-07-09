@@ -46,23 +46,23 @@ export class NotificationDispatcher {
     body: string,
     opts: { respectQuietHours?: boolean } = {},
   ): Promise<boolean> {
-    const seen = this.db
+    const seen = await this.db
       .prepare('SELECT id FROM push_outbox WHERE user_id = ? AND dedup_key = ? LIMIT 1')
       .get(userId, dedupKey);
     if (seen) return false;
 
-    if (opts.respectQuietHours && this.inQuietHours(userId)) return false;
+    if (opts.respectQuietHours && (await this.inQuietHours(userId))) return false;
 
-    const devices = this.db
+    const devices = (await this.db
       .prepare('SELECT id, platform, push_token FROM devices WHERE user_id = ?')
-      .all(userId) as Array<Record<string, unknown>>;
+      .all(userId)) as Array<Record<string, unknown>>;
     const targets = devices.length > 0 ? devices : [{ id: 'no-device', platform: 'none', push_token: null }];
     for (const device of targets) {
       const sender =
         this.senders.find((s) => s.channel !== 'outbox' && s.supports(String(device.platform))) ??
         this.senders.find((s) => s.channel === 'outbox');
       const channel = sender?.channel ?? 'outbox';
-      this.db
+      await this.db
         .prepare(
           'INSERT INTO push_outbox (id, user_id, device_id, channel, title, body, dedup_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         )
@@ -78,8 +78,8 @@ export class NotificationDispatcher {
     return true;
   }
 
-  private inQuietHours(userId: string): boolean {
-    const row = this.db.prepare('SELECT notification_prefs FROM users WHERE id = ?').get(userId) as
+  private async inQuietHours(userId: string): Promise<boolean> {
+    const row = (await this.db.prepare('SELECT notification_prefs FROM users WHERE id = ?').get(userId)) as
       | { notification_prefs: string }
       | undefined;
     const prefs = JSON.parse(row?.notification_prefs ?? '{}') as {
@@ -111,34 +111,34 @@ export class ReminderScheduler {
   }
 
   /** Create/refresh the trigger for a reminder-type item with a resolved time. */
-  ensureTrigger(userId: string, itemId: string, fireAt: number, recurrence?: string): void {
-    const existing = this.db
+  async ensureTrigger(userId: string, itemId: string, fireAt: number, recurrence?: string): Promise<void> {
+    const existing = (await this.db
       .prepare('SELECT id FROM reminder_triggers WHERE item_id = ? AND user_id = ?')
-      .get(itemId, userId) as { id: string } | undefined;
+      .get(itemId, userId)) as { id: string } | undefined;
     const now = Date.now();
     if (existing) {
-      this.db
+      await this.db
         .prepare(
           'UPDATE reminder_triggers SET fire_at = ?, recurrence = ?, delivered_at = NULL, updated_at = ? WHERE id = ?',
         )
         .run(fireAt, recurrence ?? null, now, existing.id);
       return;
     }
-    this.db
+    await this.db
       .prepare(
         'INSERT INTO reminder_triggers (id, user_id, item_id, fire_at, recurrence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
       .run(randomUUID(), userId, itemId, fireAt, recurrence ?? null, now, now);
   }
 
-  snooze(userId: string, triggerId: string, minutes: number): boolean {
-    const trigger = this.db
+  async snooze(userId: string, triggerId: string, minutes: number): Promise<boolean> {
+    const trigger = await this.db
       .prepare('SELECT id FROM reminder_triggers WHERE id = ? AND user_id = ?')
       .get(triggerId, userId);
     if (!trigger) return false;
     const until = Date.now() + minutes * 60_000;
     // Snooze re-arms delivery and syncs across devices via the change feed.
-    this.db
+    await this.db
       .prepare('UPDATE reminder_triggers SET snoozed_until = ?, fire_at = ?, delivered_at = NULL, updated_at = ? WHERE id = ?')
       .run(until, until, Date.now(), triggerId);
     return true;
@@ -146,19 +146,19 @@ export class ReminderScheduler {
 
   /** Deliver every due, undelivered trigger. Called on an interval; test-callable. */
   async tick(now = Date.now()): Promise<number> {
-    const due = this.db
+    const due = (await this.db
       .prepare(
         `SELECT rt.*, i.title, i.type, i.status FROM reminder_triggers rt
          JOIN items i ON i.id = rt.item_id
          WHERE rt.fire_at <= ? AND rt.delivered_at IS NULL`,
       )
-      .all(now) as Array<Record<string, unknown>>;
+      .all(now)) as Array<Record<string, unknown>>;
     let delivered = 0;
     for (const trigger of due) {
       const userId = String(trigger.user_id);
       const itemId = String(trigger.item_id);
       if (trigger.status === 'done' || trigger.status === 'dismissed') {
-        this.db.prepare('UPDATE reminder_triggers SET delivered_at = ? WHERE id = ?').run(now, String(trigger.id));
+        await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ? WHERE id = ?').run(now, String(trigger.id));
         continue;
       }
       let message: string;
@@ -180,20 +180,20 @@ export class ReminderScheduler {
         'Scrible',
         message,
       );
-      this.db.prepare('UPDATE reminder_triggers SET delivered_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(trigger.id));
+      await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(trigger.id));
       if (sent) delivered++;
 
       if (trigger.recurrence) {
         const next = nextOccurrence(Number(trigger.fire_at), String(trigger.recurrence));
         if (next) {
-          this.db
+          await this.db
             .prepare(
               'INSERT INTO reminder_triggers (id, user_id, item_id, fire_at, recurrence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
             )
             .run(randomUUID(), userId, itemId, next, String(trigger.recurrence), now, now);
         }
       }
-      this.sync.audit(userId, 'reminder.delivered', 'reminder_trigger', String(trigger.id), { fireAt: trigger.fire_at });
+      await this.sync.audit(userId, 'reminder.delivered', 'reminder_trigger', String(trigger.id), { fireAt: trigger.fire_at });
     }
     return delivered;
   }

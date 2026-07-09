@@ -23,7 +23,7 @@ the remaining pre-launch work (device QA, chaos/load drills, store submission).
   tried before any LLM tier, and the primary LLM is a free NVIDIA NIM-hosted model,
   with paid Anthropic demoted to an optional opt-in (see `docs/AI-MAP.md` and
   invariants #8–#9 below).
-- **Four workspaces** in an npm-workspaces monorepo: `backend/` (Fastify + SQLite),
+- **Four workspaces** in an npm-workspaces monorepo: `backend/` (Fastify + Postgres),
   `app/` (Expo / React Native, runs on iOS, Android, and web), `desktop/` (Tauri 2
   tray app), plus a build-less `extension/` (Chrome MV3, not an npm workspace).
 - **Everything works with no API keys and no cloud accounts, and can run
@@ -49,7 +49,7 @@ npm run web -w app     # web client (also: expo start for native)
 
 | Path | What it is |
 |---|---|
-| `backend/` | System of record. Fastify API v1, SQLite (portable SQL → Postgres in prod). |
+| `backend/` | System of record. Fastify API v1, Postgres (`DATABASE_URL`, any provider — local, Neon, Supabase, Fly Postgres). |
 | `app/` | Expo client (iOS/Android/web). The web build is also the "web dashboard". |
 | `extension/` | Chrome MV3 extension (plain JS, no build step). |
 | `desktop/` | Tauri 2 tray app: Rust `watcher-core` (process-launch diff, cargo-tested) + TS frontend with local matching (`src/matcher.ts`, Node-tested). See `desktop/README.md`. |
@@ -67,7 +67,7 @@ npm run web -w app     # web client (also: expo start for native)
 | `index.ts` | Production entry: starts server, reminder scheduler, calendar reconciliation sweep. |
 | `config.ts` | Env → typed config, feature flags (`FLAG_*`), retention windows. |
 | `types.ts` | Shared domain/API types (mirrored by `app/src/types.ts`). |
-| `lib/db.ts` | Schema (portable SQL), `openDb`, `deleteAllUserData` + `USER_DATA_TABLES`. |
+| `lib/db.ts` | Postgres pool (`pg`) behind a `.prepare(sql).get/all/run(...)` shim (translates `?` → `$1..$n`, all async) so the rest of the codebase reads like the old synchronous SQLite code, just `await`ed. Schema, `openDb`, `deleteAllUserData` + `USER_DATA_TABLES`. |
 | `lib/jwt.ts`, `lib/crypto.ts`, `lib/jobs.ts` | HS256 JWT; AES-256-GCM for calendar tokens; in-process async job queue. |
 | `modules/auth.ts` | Email signup/login (scrypt), JWT, `authenticate` preHandler, `/v1/me`. |
 | `modules/sync.ts` | **The heart.** `SyncEngine`: idempotent op application, change feed, LWW-per-field conflict policy (completions & new captures always survive), audit log. |
@@ -161,7 +161,7 @@ npm run web -w app     # web client (also: expo start for native)
 | Outlook Calendar | `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | Same. |
 | Push (APNs/FCM) | wire real `PushSender`s in `server.ts` | `OutboxSender` records to `push_outbox`. |
 | Token encryption | `TOKEN_ENC_KEY` (required in prod), `JWT_SECRET` (required in prod) | Dev defaults (insecure). |
-| Postgres | swap `lib/db.ts` for a PG pool; replay the same SQL | SQLite file. |
+| Postgres | `DATABASE_URL` (required in prod; defaults to a local Postgres for dev) | N/A — Postgres is the only data store now, done, no SQLite fallback. |
 
 Feature flags: `FLAG_AUTO_CLASSIFY`, `FLAG_AUTO_SCHEDULE`, `FLAG_PERSONALIZATION`,
 `FLAG_ANALYTICS` (all default on; set `=0` to disable).

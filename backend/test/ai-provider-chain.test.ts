@@ -7,17 +7,17 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testApp } from './helpers.js';
+import { testApp, resetTestSchema, TEST_DATABASE_URL } from './helpers.js';
 import { buildApp } from '../src/server.js';
 
 const baseOverrides = {
-  databasePath: ':memory:',
+  databaseUrl: TEST_DATABASE_URL,
   jwtSecret: 'test-secret',
   flags: { autoClassify: false, autoSchedule: false, personalization: false, analytics: false },
 } as const;
 
 test('classify: an explicit hint short-circuits at the heuristic-confident tier, zero tokens', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const out = await ctx.orchestrator.run('classify', {
     text: 'remind me to call the dentist tomorrow',
     context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
@@ -30,7 +30,7 @@ test('classify: an explicit hint short-circuits at the heuristic-confident tier,
 });
 
 test('decompose: explicit connectors short-circuit at the heuristic-confident tier', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const out = await ctx.orchestrator.run('decompose', {
     text: 'Clean the kitchen, then do laundry, then vacuum the living room',
     type: 'task',
@@ -41,7 +41,7 @@ test('decompose: explicit connectors short-circuit at the heuristic-confident ti
 });
 
 test('decompose: a short item confidently needs no decomposition, no AI required', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const out = await ctx.orchestrator.run('decompose', { text: 'water the plants', type: 'task' });
   assert.deepEqual(out.subtasks, []);
   const last = ctx.orchestrator.recentMetrics(10).filter((m) => m.capability === 'decompose').pop()!;
@@ -49,7 +49,7 @@ test('decompose: a short item confidently needs no decomposition, no AI required
 });
 
 test('matchDone: a strong single overlap short-circuits at the heuristic-confident tier', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const out = await ctx.orchestrator.run('matchDone', {
     utterance: 'done with the dentist appointment',
     openItems: [
@@ -63,7 +63,8 @@ test('matchDone: a strong single overlap short-circuits at the heuristic-confide
 });
 
 test('confirm never invokes AI even when nvidia/anthropic keys are configured', async () => {
-  const ctx = buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key', anthropicApiKey: 'fake-anthropic-key' });
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key', anthropicApiKey: 'fake-anthropic-key' });
   for (const event of ['captured', 'scheduled', 'moved', 'conflict', 'reminder_set', 'completed'] as const) {
     await ctx.orchestrator.run('confirm', { event, itemTitle: 'test item', itemType: 'task', detail: {} });
   }
@@ -81,7 +82,8 @@ function withStubbedFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Promise<
 }
 
 test('nvidia provider: a valid response is parsed, tokens captured, and the chain skips anthropic/heuristic', async () => {
-  const ctx = buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
   const stub = (async () =>
     ({
       ok: true,
@@ -121,7 +123,8 @@ test('nvidia provider: a valid response is parsed, tokens captured, and the chai
 });
 
 test('nvidia provider failure (bad status or malformed JSON) falls through to heuristic — never a hard failure', async () => {
-  const ctx = buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
   const failing = (async () => ({ ok: false, status: 500, json: async () => ({}) }) as unknown as Response) as typeof fetch;
 
   await withStubbedFetch(failing, async () => {
@@ -139,7 +142,7 @@ test('nvidia provider failure (bad status or malformed JSON) falls through to he
 });
 
 test('zero-config smoke: with no AI keys at all, every capability still resolves — never fails, never costs anything', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const out = await ctx.orchestrator.run('classify', {
     text: 'organize the shared drive folders at some point',
     context: { localHour: 10, recentTypes: [], timezone: 'UTC' },

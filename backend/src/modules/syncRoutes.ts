@@ -13,13 +13,13 @@ export function registerSyncRoutes(app: FastifyInstance, sync: SyncEngine): void
         return reply.code(400).send({ error: 'each op needs opId, kind, entityId' });
       }
     }
-    return { results: sync.applyOps(req.userId, ops) };
+    return { results: await sync.applyOps(req.userId, ops) };
   });
 
   /** Catch-up: all changes after `since` (a change seq). */
   app.get('/v1/sync/changes', { preHandler: app.authenticate }, async (req) => {
     const { since } = req.query as { since?: string };
-    const changes = sync.changesSince(req.userId, Number(since ?? 0));
+    const changes = await sync.changesSince(req.userId, Number(since ?? 0));
     return { changes, latest: changes.length ? changes[changes.length - 1]!.seq : Number(since ?? 0) };
   });
 

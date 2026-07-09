@@ -6,7 +6,7 @@ import { testApp, signup, auth } from './helpers.js';
 import { splitUtterance } from '../src/ai/providers/heuristic.js';
 
 test('same item completed on two offline devices merges to one completion', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -38,7 +38,7 @@ test('same item completed on two offline devices merges to one completion', asyn
 });
 
 test('clock-skewed client cannot poison future edits', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const farFuture = Date.now() + 365 * 24 * 3600_000;
   await ctx.app.inject({
@@ -65,13 +65,13 @@ test('clock-skewed client cannot poison future edits', async () => {
   // The clamp bounds skew at +5 minutes; a same-moment edit loses LWW to the clamp
   // ceiling, so verify the ceiling itself: stored version must be ≤ now + 5m.
   assert.ok(item.updatedAt <= Date.now() + 6 * 60_000);
-  const raw = ctx.db.prepare('SELECT field_versions FROM items WHERE id = ?').get('sk-item') as { field_versions: string };
+  const raw = (await ctx.db.prepare('SELECT field_versions FROM items WHERE id = ?').get('sk-item')) as { field_versions: string };
   const versions = JSON.parse(raw.field_versions) as Record<string, number>;
   assert.ok(versions.title! <= Date.now() + 5 * 60_000 + 1000, 'field clock clamped');
 });
 
 test('re-installed app restores full state from a cold change feed', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({ method: 'POST', url: '/v1/items', headers: auth(token), payload: { id: 'ri1', rawText: 'alpha' } });
   await ctx.app.inject({ method: 'POST', url: '/v1/items', headers: auth(token), payload: { id: 'ri2', rawText: 'beta' } });
@@ -91,7 +91,7 @@ test('re-installed app restores full state from a cold change feed', async () =>
 });
 
 test('multi-item utterance splits into separate items, each classified', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -111,7 +111,7 @@ test('multi-item utterance splits into separate items, each classified', async (
 });
 
 test('plain "and" does NOT split — decomposition handles it instead', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -126,7 +126,7 @@ test('plain "and" does NOT split — decomposition handles it instead', async ()
 });
 
 test('garbled short capture is saved, never dropped', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   const res = await ctx.app.inject({
     method: 'POST',
@@ -142,7 +142,7 @@ test('garbled short capture is saved, never dropped', async () => {
 });
 
 test('ambiguous spoken done returns candidates instead of guessing', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({ method: 'POST', url: '/v1/items', headers: auth(token), payload: { id: 'am1', rawText: 'Email the launch report to sales' } });
   await ctx.app.inject({ method: 'POST', url: '/v1/items', headers: auth(token), payload: { id: 'am2', rawText: 'Email the launch report to marketing' } });

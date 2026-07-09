@@ -27,13 +27,13 @@ export class AnalyticsForwarder {
   ) {}
 
   /** Random per-user pseudonymous id; created lazily, erased on unlink. */
-  private pseudoId(userId: string): string {
-    const row = this.db.prepare('SELECT pseudo_id FROM analytics_ids WHERE user_id = ?').get(userId) as
+  private async pseudoId(userId: string): Promise<string> {
+    const row = (await this.db.prepare('SELECT pseudo_id FROM analytics_ids WHERE user_id = ?').get(userId)) as
       | { pseudo_id: string }
       | undefined;
     if (row) return row.pseudo_id;
     const id = randomUUID();
-    this.db
+    await this.db
       .prepare('INSERT INTO analytics_ids (user_id, pseudo_id, created_at) VALUES (?, ?, ?)')
       .run(userId, id, Date.now());
     return id;
@@ -43,13 +43,13 @@ export class AnalyticsForwarder {
    * Track one event. Returns 'stored' | 'no-consent' | 'rejected'. Consent-off users
    * generate zero rows and zero provider traffic.
    */
-  track(userId: string, name: string, props: Record<string, unknown> = {}): 'stored' | 'no-consent' | 'rejected' {
-    if (!hasConsent(this.db, userId, 'analytics')) return 'no-consent';
+  async track(userId: string, name: string, props: Record<string, unknown> = {}): Promise<'stored' | 'no-consent' | 'rejected'> {
+    if (!(await hasConsent(this.db, userId, 'analytics'))) return 'no-consent';
     const result = validateEvent(name, props);
     if (!result.ok) return 'rejected';
     const ts = Date.now();
-    const pseudoId = this.pseudoId(userId);
-    this.db
+    const pseudoId = await this.pseudoId(userId);
+    await this.db
       .prepare(
         'INSERT INTO analytics_events (id, pseudo_id, event, props, schema_version, ts) VALUES (?, ?, ?, ?, ?, ?)',
       )

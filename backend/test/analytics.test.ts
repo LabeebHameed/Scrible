@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
-const grantAnalytics = (ctx: ReturnType<typeof testApp>, token: string) =>
+const grantAnalytics = (ctx: Awaited<ReturnType<typeof testApp>>, token: string) =>
   ctx.app.inject({
     method: 'POST',
     url: '/v1/consents',
@@ -11,7 +11,7 @@ const grantAnalytics = (ctx: ReturnType<typeof testApp>, token: string) =>
   });
 
 test('consent-off users generate zero analytics rows', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   const res = await ctx.app.inject({
     method: 'POST',
@@ -21,12 +21,16 @@ test('consent-off users generate zero analytics rows', async () => {
   });
   assert.equal(res.statusCode, 202);
   assert.equal(res.json().stored, 0);
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()!.c, 0);
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids').get()!.c, 0, 'no pseudo id minted');
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()) as { c: number }).c, 0);
+  assert.equal(
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids').get()) as { c: number }).c,
+    0,
+    'no pseudo id minted',
+  );
 });
 
 test('events are stored under a pseudonymous id, never the account id', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await grantAnalytics(ctx, token);
   await ctx.app.inject({
@@ -40,7 +44,7 @@ test('events are stored under a pseudonymous id, never the account id', async ()
       ],
     },
   });
-  const rows = ctx.db.prepare('SELECT * FROM analytics_events').all() as Array<Record<string, unknown>>;
+  const rows = (await ctx.db.prepare('SELECT * FROM analytics_events').all()) as Array<Record<string, unknown>>;
   assert.equal(rows.length, 2);
   for (const row of rows) {
     assert.notEqual(row.pseudo_id, userId);
@@ -49,7 +53,7 @@ test('events are stored under a pseudonymous id, never the account id', async ()
 });
 
 test('taxonomy enforcement: unknown events, unknown props, and free text are rejected', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await grantAnalytics(ctx, token);
   const res = await ctx.app.inject({
@@ -67,12 +71,12 @@ test('taxonomy enforcement: unknown events, unknown props, and free text are rej
   });
   assert.equal(res.json().stored, 1, 'only the fully-conformant event lands');
   assert.equal(res.json().dropped, 3);
-  const rows = ctx.db.prepare('SELECT props FROM analytics_events').all() as Array<{ props: string }>;
+  const rows = (await ctx.db.prepare('SELECT props FROM analytics_events').all()) as Array<{ props: string }>;
   assert.ok(!rows.some((r) => r.props.includes('milk')), 'no content text stored');
 });
 
 test('revoking analytics consent stops emission and unlinks history', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await grantAnalytics(ctx, token);
   await ctx.app.inject({
@@ -91,13 +95,16 @@ test('revoking analytics consent stops emission and unlinks history', async () =
     payload: { events: [{ name: 'app.opened', props: { surface: 'web' } }] },
   });
   assert.equal(after.json().stored, 0);
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids WHERE user_id = ?').get(userId)!.c, 0);
+  assert.equal(
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids WHERE user_id = ?').get(userId)) as { c: number }).c,
+    0,
+  );
   // Historical event rows survive but are anonymous — nothing maps them back.
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()!.c, 1);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()) as { c: number }).c, 1);
 });
 
 test('account deletion also unlinks analytics via USER_DATA_TABLES', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   await grantAnalytics(ctx, token);
   await ctx.app.inject({
@@ -107,11 +114,14 @@ test('account deletion also unlinks analytics via USER_DATA_TABLES', async () =>
     payload: { events: [{ name: 'app.opened', props: { surface: 'ios' } }] },
   });
   await ctx.app.inject({ method: 'DELETE', url: '/v1/me', headers: auth(token) });
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids WHERE user_id = ?').get(userId)!.c, 0);
+  assert.equal(
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_ids WHERE user_id = ?').get(userId)) as { c: number }).c,
+    0,
+  );
 });
 
 test('server-side instrumentation flows through the same consent gate', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   // No consent: enrichment happens, but no analytics row.
   await ctx.app.inject({
@@ -121,7 +131,7 @@ test('server-side instrumentation flows through the same consent gate', async ()
     payload: { id: 'a1', rawText: 'water the plants', source: 'voice' },
   });
   await ctx.jobs.onIdle();
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()!.c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM analytics_events').get()) as { c: number }).c, 0);
 
   await grantAnalytics(ctx, token);
   await ctx.app.inject({
@@ -131,12 +141,12 @@ test('server-side instrumentation flows through the same consent gate', async ()
     payload: { id: 'a2', rawText: 'buy stamps', source: 'voice' },
   });
   await ctx.jobs.onIdle();
-  const rows = ctx.db.prepare("SELECT event FROM analytics_events WHERE event = 'item.created'").all();
+  const rows = await ctx.db.prepare("SELECT event FROM analytics_events WHERE event = 'item.created'").all();
   assert.equal(rows.length, 1);
 });
 
 test('data export contains the user data and only theirs', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const a = await signup(ctx);
   const b = await signup(ctx);
   await ctx.app.inject({
@@ -168,7 +178,7 @@ test('data export contains the user data and only theirs', async () => {
 });
 
 test('export never contains OAuth token material', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',

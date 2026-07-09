@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('reminder with explicit time gets a trigger and is delivered exactly once', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token, userId } = await signup(ctx);
 
   await ctx.app.inject({
@@ -26,12 +26,12 @@ test('reminder with explicit time gets a trigger and is delivered exactly once',
   // …and never again (dedup across ticks/channels).
   assert.equal(await ctx.reminders.tick(fireTime + 60_000), 0);
 
-  const outbox = ctx.db.prepare('SELECT * FROM push_outbox WHERE user_id = ?').all(userId);
+  const outbox = await ctx.db.prepare('SELECT * FROM push_outbox WHERE user_id = ?').all(userId);
   assert.equal(outbox.length, 1);
 });
 
 test('completing an item suppresses its pending reminder', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token, userId } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -44,11 +44,11 @@ test('completing an item suppresses its pending reminder', async () => {
 
   const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
   assert.equal(await ctx.reminders.tick(trigger.fireAt + 1000), 0, 'no notification for a done item');
-  assert.equal(ctx.db.prepare('SELECT COUNT(*) c FROM push_outbox WHERE user_id = ?').get(userId)!.c, 0);
+  assert.equal(((await ctx.db.prepare('SELECT COUNT(*) c FROM push_outbox WHERE user_id = ?').get(userId)) as { c: number }).c, 0);
 });
 
 test('snooze re-arms delivery at the later time', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -72,7 +72,7 @@ test('snooze re-arms delivery at the later time', async () => {
 });
 
 test('recurring reminder schedules the next occurrence after firing', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -92,7 +92,7 @@ test('recurring reminder schedules the next occurrence after firing', async () =
 });
 
 test('confirmation notifications respect quiet hours but reminders do not', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx);
   const hour = new Date().getHours();
   await ctx.app.inject({

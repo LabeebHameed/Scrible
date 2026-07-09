@@ -1,6 +1,6 @@
 export interface Config {
   port: number;
-  databasePath: string;
+  databaseUrl: string;
   jwtSecret: string;
   anthropicApiKey: string | undefined;
   /** Free-tier-first primary LLM (Phase 9): NVIDIA NIM or any OpenAI-compatible endpoint. */
@@ -24,9 +24,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (env.NODE_ENV === 'production' && !env.JWT_SECRET) {
     throw new Error('JWT_SECRET is required in production');
   }
+  if (env.NODE_ENV === 'production' && !env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is required in production');
+  }
   return {
     port: Number(env.PORT ?? 8787),
-    databasePath: env.DATABASE_PATH ?? 'scrible.db',
+    databaseUrl: env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5432/scrible_dev',
     jwtSecret,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     nvidiaApiKey: env.NVIDIA_API_KEY,

@@ -25,67 +25,67 @@ function keysFor(text: string): string[] {
   return [...new Set([...tokens, ...bigrams(tokens)])];
 }
 
-function upsert(db: Db, userId: string, kind: string, key: string, value: string, delta: number): void {
-  const row = db
+async function upsert(db: Db, userId: string, kind: string, key: string, value: string, delta: number): Promise<void> {
+  const row = (await db
     .prepare('SELECT weight FROM learned_signals WHERE user_id = ? AND kind = ? AND key = ? AND value = ?')
-    .get(userId, kind, key, value) as { weight: number } | undefined;
+    .get(userId, kind, key, value)) as { weight: number } | undefined;
   const next = Math.max(0, (row?.weight ?? 0) + delta);
   if (row) {
     if (next <= 0) {
-      db.prepare('DELETE FROM learned_signals WHERE user_id = ? AND kind = ? AND key = ? AND value = ?').run(
+      await db.prepare('DELETE FROM learned_signals WHERE user_id = ? AND kind = ? AND key = ? AND value = ?').run(
         userId,
         kind,
         key,
         value,
       );
     } else {
-      db.prepare(
+      await db.prepare(
         'UPDATE learned_signals SET weight = ?, updated_at = ? WHERE user_id = ? AND kind = ? AND key = ? AND value = ?',
       ).run(next, Date.now(), userId, kind, key, value);
     }
   } else if (next > 0) {
-    db.prepare(
+    await db.prepare(
       'INSERT INTO learned_signals (id, user_id, kind, key, value, weight, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ).run(randomUUID(), userId, kind, key, value, next, Date.now());
   }
 }
 
 /** A user corrected an item's type (fromType → toType) — the strongest teaching signal. */
-export function learnFromCorrection(
+export async function learnFromCorrection(
   db: Db,
   userId: string,
   itemText: string,
   fromType: ItemType,
   toType: ItemType,
-): void {
+): Promise<void> {
   if (fromType === toType) return;
   for (const key of keysFor(itemText)) {
-    upsert(db, userId, 'type_prior', key, toType, CONFIRM_WEIGHT);
-    upsert(db, userId, 'type_prior', key, fromType, -DISCONFIRM_WEIGHT);
+    await upsert(db, userId, 'type_prior', key, toType, CONFIRM_WEIGHT);
+    await upsert(db, userId, 'type_prior', key, fromType, -DISCONFIRM_WEIGHT);
   }
-  prune(db, userId);
+  await prune(db, userId);
 }
 
 /** A user manually set an app-launch trigger — associate the item's tokens with it. */
-export function learnAppAlias(db: Db, userId: string, itemText: string, appTrigger: string): void {
+export async function learnAppAlias(db: Db, userId: string, itemText: string, appTrigger: string): Promise<void> {
   const trigger = appTrigger.trim().toLowerCase();
   if (!trigger) return;
   for (const key of keysFor(itemText)) {
-    upsert(db, userId, 'app_alias', key, trigger, CONFIRM_WEIGHT);
+    await upsert(db, userId, 'app_alias', key, trigger, CONFIRM_WEIGHT);
   }
-  prune(db, userId);
+  await prune(db, userId);
 }
 
 /** Aggregate type-prior evidence for a piece of text, strongest type first. */
-export function typePriors(db: Db, userId: string, text: string): Array<{ type: ItemType; score: number }> {
+export async function typePriors(db: Db, userId: string, text: string): Promise<Array<{ type: ItemType; score: number }>> {
   const keys = keysFor(text);
   if (keys.length === 0) return [];
   const placeholders = keys.map(() => '?').join(',');
-  const rows = db
+  const rows = (await db
     .prepare(
       `SELECT value, weight FROM learned_signals WHERE user_id = ? AND kind = 'type_prior' AND key IN (${placeholders})`,
     )
-    .all(userId, ...keys) as Array<{ value: string; weight: number }>;
+    .all(userId, ...keys)) as Array<{ value: string; weight: number }>;
   // Max per type (not sum across keys): a correction bumps every one of its keys by
   // the same amount, so summing would let a single correction's several keys (token +
   // bigrams) look like several corrections. The strongest single matching key is the
@@ -98,15 +98,15 @@ export function typePriors(db: Db, userId: string, text: string): Array<{ type: 
 }
 
 /** Strongest learned app-alias match for a piece of text, if any. */
-export function appAliasFor(db: Db, userId: string, text: string): { value: string; score: number } | null {
+export async function appAliasFor(db: Db, userId: string, text: string): Promise<{ value: string; score: number } | null> {
   const keys = keysFor(text);
   if (keys.length === 0) return null;
   const placeholders = keys.map(() => '?').join(',');
-  const rows = db
+  const rows = (await db
     .prepare(
       `SELECT value, weight FROM learned_signals WHERE user_id = ? AND kind = 'app_alias' AND key IN (${placeholders})`,
     )
-    .all(userId, ...keys) as Array<{ value: string; weight: number }>;
+    .all(userId, ...keys)) as Array<{ value: string; weight: number }>;
   if (rows.length === 0) return null;
   const totals = new Map<string, number>();
   for (const r of rows) totals.set(r.value, (totals.get(r.value) ?? 0) + r.weight);
@@ -115,48 +115,48 @@ export function appAliasFor(db: Db, userId: string, text: string): { value: stri
 }
 
 /** All single-token key weights, summed across kinds — used to sharpen matchDone scoring. */
-export function keyWeights(db: Db, userId: string): Map<string, number> {
-  const rows = db
+export async function keyWeights(db: Db, userId: string): Promise<Map<string, number>> {
+  const rows = (await db
     .prepare("SELECT key, SUM(weight) AS w FROM learned_signals WHERE user_id = ? AND key NOT LIKE '% %' GROUP BY key")
-    .all(userId) as Array<{ key: string; w: number }>;
-  return new Map(rows.map((r) => [r.key, r.w]));
+    .all(userId)) as Array<{ key: string; w: number }>;
+  return new Map(rows.map((r) => [r.key, Number(r.w)]));
 }
 
 /** Hard cap (build plan invariant): halve all weights and drop weak rows, then trim to the cap. */
-export function prune(db: Db, userId: string): void {
-  const { c } = db.prepare('SELECT COUNT(*) AS c FROM learned_signals WHERE user_id = ?').get(userId) as {
+export async function prune(db: Db, userId: string): Promise<void> {
+  const { c } = (await db.prepare('SELECT COUNT(*) AS c FROM learned_signals WHERE user_id = ?').get(userId)) as {
     c: number;
   };
-  if (c <= CAP_PER_USER) return;
-  db.prepare('UPDATE learned_signals SET weight = weight / 2 WHERE user_id = ?').run(userId);
-  db.prepare('DELETE FROM learned_signals WHERE user_id = ? AND weight < 0.5').run(userId);
-  const { c: after } = db.prepare('SELECT COUNT(*) AS c FROM learned_signals WHERE user_id = ?').get(userId) as {
+  if (Number(c) <= CAP_PER_USER) return;
+  await db.prepare('UPDATE learned_signals SET weight = weight / 2 WHERE user_id = ?').run(userId);
+  await db.prepare('DELETE FROM learned_signals WHERE user_id = ? AND weight < 0.5').run(userId);
+  const { c: after } = (await db.prepare('SELECT COUNT(*) AS c FROM learned_signals WHERE user_id = ?').get(userId)) as {
     c: number;
   };
-  if (after > CAP_PER_USER) {
-    db.prepare(
+  if (Number(after) > CAP_PER_USER) {
+    await db.prepare(
       `DELETE FROM learned_signals WHERE id IN (
         SELECT id FROM learned_signals WHERE user_id = ? ORDER BY weight ASC, updated_at ASC LIMIT ?
       )`,
-    ).run(userId, after - CAP_PER_USER);
+    ).run(userId, Number(after) - CAP_PER_USER);
   }
 }
 
 /** Top-15 single-token keys by weight — feeds the profile's already-capped vocabulary field. */
-export function learnedVocabulary(db: Db, userId: string): string[] {
-  const rows = db
+export async function learnedVocabulary(db: Db, userId: string): Promise<string[]> {
+  const rows = (await db
     .prepare(
       "SELECT key, SUM(weight) AS w FROM learned_signals WHERE user_id = ? AND key NOT LIKE '% %' GROUP BY key ORDER BY w DESC LIMIT 15",
     )
-    .all(userId) as Array<{ key: string; w: number }>;
+    .all(userId)) as Array<{ key: string; w: number }>;
   return rows.map((r) => r.key);
 }
 
 /** Plain-language transparency summary for GET /v1/profile. */
-export function learnedSummary(db: Db, userId: string): { counts: Record<string, number>; patterns: string[] } {
-  const rows = db
+export async function learnedSummary(db: Db, userId: string): Promise<{ counts: Record<string, number>; patterns: string[] }> {
+  const rows = (await db
     .prepare('SELECT kind, key, value, weight FROM learned_signals WHERE user_id = ? ORDER BY weight DESC')
-    .all(userId) as Array<{ kind: string; key: string; value: string; weight: number }>;
+    .all(userId)) as Array<{ kind: string; key: string; value: string; weight: number }>;
   const counts: Record<string, number> = {};
   for (const r of rows) counts[r.kind] = (counts[r.kind] ?? 0) + 1;
   const patterns = rows

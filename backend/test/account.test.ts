@@ -4,7 +4,7 @@ import { testApp, signup, auth } from './helpers.js';
 import { USER_DATA_TABLES } from '../src/lib/db.js';
 
 test('account deletion removes every trace of the user', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token, userId } = await signup(ctx, 'deleteme@test.dev');
 
   // Populate data across the model.
@@ -46,9 +46,9 @@ test('account deletion removes every trace of the user', async () => {
   // Verify zero rows remain for this user in every user-data table.
   for (const table of USER_DATA_TABLES) {
     const col = table === 'users' ? 'id' : 'user_id';
-    const row = ctx.db
+    const row = (await ctx.db
       .prepare(`SELECT COUNT(*) AS c FROM ${table} WHERE ${col} = ?`)
-      .get(userId) as { c: number };
+      .get(userId)) as { c: number };
     assert.equal(row.c, 0, `expected 0 rows in ${table}`);
   }
 
@@ -64,7 +64,7 @@ test('account deletion removes every trace of the user', async () => {
 });
 
 test('deletion does not touch other users', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const a = await signup(ctx);
   const b = await signup(ctx);
   await ctx.app.inject({

@@ -18,23 +18,23 @@ export function registerExtension(app: FastifyInstance, db: Db, sync: SyncEngine
   app.post('/v1/extension/checkin', { preHandler: app.authenticate }, async (req) => {
     const { deviceId } = (req.body ?? {}) as { deviceId?: string };
     if (deviceId) {
-      db.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND user_id = ?').run(
+      await db.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND user_id = ?').run(
         Date.now(),
         deviceId,
         req.userId,
       );
     }
-    const rows = db
+    const rows = (await db
       .prepare(
         `SELECT * FROM items WHERE user_id = ? AND context_tag = 'computer-action'
          AND status IN ('captured','processing','active','scheduled')
          ORDER BY created_at LIMIT 20`,
       )
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     const items = rows.map(rowToItem);
     // Delivery is audit-logged so "what surfaced where" is always answerable.
     for (const item of items) {
-      sync.audit(req.userId, 'popup.pending', 'item', item.id, { deviceId: deviceId ?? null });
+      await sync.audit(req.userId, 'popup.pending', 'item', item.id, { deviceId: deviceId ?? null });
     }
     return { items };
   });
@@ -47,19 +47,19 @@ export function registerExtension(app: FastifyInstance, db: Db, sync: SyncEngine
   app.post('/v1/desktop/checkin', { preHandler: app.authenticate }, async (req) => {
     const { deviceId } = (req.body ?? {}) as { deviceId?: string };
     if (deviceId) {
-      db.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND user_id = ?').run(
+      await db.prepare('UPDATE devices SET last_seen = ? WHERE id = ? AND user_id = ?').run(
         Date.now(),
         deviceId,
         req.userId,
       );
     }
-    const rows = db
+    const rows = (await db
       .prepare(
         `SELECT * FROM items WHERE user_id = ? AND app_trigger IS NOT NULL
          AND status IN ('captured','processing','active','scheduled')
          ORDER BY created_at LIMIT 50`,
       )
-      .all(req.userId) as Array<Record<string, unknown>>;
+      .all(req.userId)) as Array<Record<string, unknown>>;
     return { items: rows.map(rowToItem) };
   });
 
@@ -67,7 +67,7 @@ export function registerExtension(app: FastifyInstance, db: Db, sync: SyncEngine
   app.post('/v1/extension/shown', { preHandler: app.authenticate }, async (req) => {
     const { itemIds } = (req.body ?? {}) as { itemIds?: string[] };
     for (const id of itemIds ?? []) {
-      sync.audit(req.userId, 'popup.shown', 'item', String(id), {});
+      await sync.audit(req.userId, 'popup.shown', 'item', String(id), {});
     }
     return { ok: true };
   });

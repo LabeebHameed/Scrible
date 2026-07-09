@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { testApp, signup, auth } from './helpers.js';
 
 test('computer-action tasks surface at extension check-in; others do not', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
 
   await ctx.app.inject({
@@ -40,7 +40,7 @@ test('computer-action tasks surface at extension check-in; others do not', async
 });
 
 test('completing in the popup clears it everywhere; completing on phone withdraws the popup', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',
@@ -65,7 +65,7 @@ test('completing in the popup clears it everywhere; completing on phone withdraw
 });
 
 test('user can toggle computer-action per item ("show me this on my laptop")', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { token } = await signup(ctx);
   await ctx.app.inject({
     method: 'POST',

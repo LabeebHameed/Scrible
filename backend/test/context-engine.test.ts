@@ -9,7 +9,7 @@ import { learnFromCorrection, learnedVocabulary } from '../src/ai/learning.js';
 import { deleteAllUserData, verifyDeletion } from '../src/lib/db.js';
 import type { ItemType } from '../src/types.js';
 
-const grantChatImport = (ctx: ReturnType<typeof testApp>, token: string) =>
+const grantChatImport = (ctx: Awaited<ReturnType<typeof testApp>>, token: string) =>
   ctx.app.inject({
     method: 'POST',
     url: '/v1/consents',
@@ -18,7 +18,7 @@ const grantChatImport = (ctx: ReturnType<typeof testApp>, token: string) =>
   });
 
 test('correcting a pattern twice teaches the learned provider — the next similar capture short-circuits at zero tokens', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);
   await grantChatImport(ctx, token);
 
@@ -59,14 +59,14 @@ test('correcting a pattern twice teaches the learned provider — the next simil
 });
 
 test('prior disagreement falls through the chain instead of guessing', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token, userId } = await signup(ctx);
   const now = Date.now();
   const insert = ctx.db.prepare(
     'INSERT INTO learned_signals (id, user_id, kind, key, value, weight, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
-  insert.run('s1', userId, 'type_prior', 'ambiguous', 'reminder', 3, now);
-  insert.run('s2', userId, 'type_prior', 'ambiguous', 'idea', 2, now);
+  await insert.run('s1', userId, 'type_prior', 'ambiguous', 'reminder', 3, now);
+  await insert.run('s2', userId, 'type_prior', 'ambiguous', 'idea', 2, now);
 
   await ctx.app.inject({
     method: 'POST',
@@ -83,7 +83,7 @@ test('prior disagreement falls through the chain instead of guessing', async () 
 });
 
 test('token invariance: the classify wire payload is unaffected by learned_signals or profile size', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { userId } = await signup(ctx);
 
   const wirePayload = (recentTypes: ItemType[], text: string) =>
@@ -94,27 +94,27 @@ test('token invariance: the classify wire payload is unaffected by learned_signa
   const insert = ctx.db.prepare(
     'INSERT INTO learned_signals (id, user_id, kind, key, value, weight, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
-  for (let i = 0; i < 500; i++) insert.run(`sig${i}`, userId, 'type_prior', `term${i}`, 'reminder', 1, Date.now());
+  for (let i = 0; i < 500; i++) await insert.run(`sig${i}`, userId, 'type_prior', `term${i}`, 'reminder', 1, Date.now());
 
   const after = wirePayload(['task', 'idea', 'reminder', 'task', 'idea'], 'plan the offsite retro');
   assert.equal(after.length, before.length, 'the actual Claude wire payload never grows with learned evidence');
-  assert.ok(learnedVocabulary(ctx.db, userId).length <= 15, 'vocabulary fed back to the profile stays capped at 15');
+  assert.ok((await learnedVocabulary(ctx.db, userId)).length <= 15, 'vocabulary fed back to the profile stays capped at 15');
 });
 
 test('prune enforces the 200-row-per-user cap as evidence accumulates', async () => {
-  const ctx = testApp();
+  const ctx = await testApp();
   const { userId } = await signup(ctx);
   for (let i = 0; i < 300; i++) {
-    learnFromCorrection(ctx.db, userId, `unique item number ${i} distinct words`, 'task', 'reminder');
+    await learnFromCorrection(ctx.db, userId, `unique item number ${i} distinct words`, 'task', 'reminder');
   }
-  const { c } = ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId) as {
+  const { c } = (await ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId)) as {
     c: number;
   };
   assert.ok(c <= 200, `expected the table capped at <=200 rows, got ${c}`);
 });
 
 test('learning is consent-gated; profile deletion and account deletion purge learned_signals', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token, userId } = await signup(ctx);
 
   // No chat_import consent yet — corrections must not teach anything.
@@ -132,7 +132,7 @@ test('learning is consent-gated; profile deletion and account deletion purge lea
     payload: { type: 'reminder' },
   });
   assert.equal(
-    (ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId) as { c: number }).c,
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId)) as { c: number }).c,
     0,
     'no consent, no learning',
   );
@@ -152,12 +152,12 @@ test('learning is consent-gated; profile deletion and account deletion purge lea
     payload: { type: 'reminder' },
   });
   assert.ok(
-    (ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId) as { c: number }).c > 0,
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId)) as { c: number }).c > 0,
     'consent granted — correction recorded',
   );
 
   // The transparency section attaches to whatever profile exists; give this user one.
-  ctx.db
+  await ctx.db
     .prepare('INSERT INTO profiles (user_id, attributes, updated_at) VALUES (?, ?, ?)')
     .run(userId, '{"tone":"brief"}', Date.now());
   const profile = (await ctx.app.inject({ method: 'GET', url: '/v1/profile', headers: auth(token) })).json();
@@ -166,22 +166,22 @@ test('learning is consent-gated; profile deletion and account deletion purge lea
   const del = await ctx.app.inject({ method: 'DELETE', url: '/v1/profile', headers: auth(token) });
   assert.ok(del.json().counts.learned_signals > 0);
   assert.equal(
-    (ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId) as { c: number }).c,
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId)) as { c: number }).c,
     0,
     'profile delete purges learned_signals',
   );
 
   // Re-teach, then verify the account-deletion sweep also purges it.
-  learnFromCorrection(ctx.db, userId, 'water the plants', 'task', 'reminder');
+  await learnFromCorrection(ctx.db, userId, 'water the plants', 'task', 'reminder');
   assert.ok(
-    (ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId) as { c: number }).c > 0,
+    ((await ctx.db.prepare('SELECT COUNT(*) c FROM learned_signals WHERE user_id = ?').get(userId)) as { c: number }).c > 0,
   );
-  deleteAllUserData(ctx.db, userId);
-  assert.equal(verifyDeletion(ctx.db, userId).learned_signals, 0, 'account deletion purges learned_signals');
+  await deleteAllUserData(ctx.db, userId);
+  assert.equal((await verifyDeletion(ctx.db, userId)).learned_signals, 0, 'account deletion purges learned_signals');
 });
 
 test('app-alias learning: a manual appTrigger teaches; a similar capture inherits it; server-origin updates never teach', async () => {
-  const ctx = testApp({ autoClassify: true });
+  const ctx = await testApp({ autoClassify: true });
   const { token, userId } = await signup(ctx);
   await grantChatImport(ctx, token);
 
@@ -199,7 +199,7 @@ test('app-alias learning: a manual appTrigger teaches; a similar capture inherit
     payload: { appTrigger: 'figma' },
   });
 
-  const aliasRows = ctx.db
+  const aliasRows = await ctx.db
     .prepare("SELECT * FROM learned_signals WHERE user_id = ? AND kind = 'app_alias'")
     .all(userId);
   assert.ok(aliasRows.length > 0, 'manual appTrigger edit taught an alias');
@@ -214,13 +214,13 @@ test('app-alias learning: a manual appTrigger teaches; a similar capture inherit
   const al2 = (await ctx.app.inject({ method: 'GET', url: '/v1/items/al2', headers: auth(token) })).json();
   assert.equal(al2.appTrigger, 'figma', 'the learned alias was inherited on a similar capture');
 
-  const countAliasRows = () =>
+  const countAliasRows = async () =>
     (
-      ctx.db
+      (await ctx.db
         .prepare("SELECT COUNT(*) c FROM learned_signals WHERE user_id = ? AND kind = 'app_alias'")
-        .get(userId) as { c: number }
+        .get(userId)) as { c: number }
     ).c;
-  const before = countAliasRows();
+  const before = await countAliasRows();
 
   // Enrichment itself derives an appTrigger from phrasing here — a server-originated
   // write. It must never teach the learner (only genuine user edits do).
@@ -233,5 +233,5 @@ test('app-alias learning: a manual appTrigger teaches; a similar capture inherit
   await ctx.jobs.onIdle();
   const al3 = (await ctx.app.inject({ method: 'GET', url: '/v1/items/al3', headers: auth(token) })).json();
   assert.equal(al3.appTrigger, 'slack', 'heuristic still derives the trigger from explicit phrasing');
-  assert.equal(countAliasRows(), before, 'server-originated appTrigger writes do not teach the learner');
+  assert.equal(await countAliasRows(), before, 'server-originated appTrigger writes do not teach the learner');
 });
