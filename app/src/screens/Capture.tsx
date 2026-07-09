@@ -8,7 +8,7 @@ import { colors } from '../theme';
 
 type Phase = 'idle' | 'recording' | 'saving';
 
-export function CaptureScreen(props: { store: SyncStore; api: ApiClient }) {
+export function CaptureScreen(props: { store: SyncStore; api: ApiClient; autoStartSignal?: number }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [transcript, setTranscript] = useState('');
   const [typed, setTyped] = useState('');
@@ -16,6 +16,7 @@ export function CaptureScreen(props: { store: SyncStore; api: ApiClient }) {
   const [speechOk, setSpeechOk] = useState<boolean | null>(null);
   const [lastItemId, setLastItemId] = useState<string | null>(null);
   const session = useRef<DictationSession | null>(null);
+  const lastAutoStart = useRef(0);
 
   useEffect(() => {
     void isSpeechAvailable().then(setSpeechOk);
@@ -87,6 +88,16 @@ export function CaptureScreen(props: { store: SyncStore; api: ApiClient }) {
       setFeedback('Voice input is not available here — type your item below.');
     }
   };
+
+  // Widget/deep-link entry point (`scrible://capture?autostart=1`): start recording
+  // the instant this screen is reached — one tap from the home screen to talking.
+  useEffect(() => {
+    const signal = props.autoStartSignal ?? 0;
+    if (signal === lastAutoStart.current) return;
+    lastAutoStart.current = signal;
+    if (phase === 'idle' && speechOk !== false) void toggleRecording();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.autoStartSignal]);
 
   return (
     <View style={styles.root}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import type { ApiClient, ProfileView } from '../api';
+import type { ApiClient, CalendarLink, ProfileView } from '../api';
+import type { PushStatus } from '../push';
 import { setAnalyticsEnabled } from '../analytics';
 import type { SyncStore } from '../store';
 import { colors } from '../theme';
@@ -8,7 +9,7 @@ import { colors } from '../theme';
 const CONSENTS: Array<{ key: string; label: string; detail: string }> = [
   { key: 'voice_processing', label: 'Voice processing', detail: 'Transcribe your voice on-device to create items.' },
   { key: 'voice_retention', label: 'Keep recordings', detail: 'Retain raw audio after transcription (off = deleted immediately).' },
-  { key: 'calendar_access', label: 'Calendar access', detail: 'Read free/busy and write Scrible blocks to your calendar.' },
+  { key: 'calendar_access', label: 'Calendar access', detail: 'Let major items (meetings, appointments) get a block on Scrible’s own internal calendar.' },
   { key: 'chat_import', label: 'Chat import & profile', detail: 'Derive a working-style profile from imported assistant chats.' },
   { key: 'analytics', label: 'Product analytics', detail: 'Anonymous usage events. Never your words or titles.' },
   { key: 'app_watcher', label: 'Desktop app watcher', detail: 'Let the desktop app notice app launches to surface matching items. App names never leave that device.' },
@@ -17,6 +18,7 @@ const CONSENTS: Array<{ key: string; label: string; detail: string }> = [
 export function SettingsScreen(props: {
   api: ApiClient;
   store: SyncStore;
+  pushStatus?: PushStatus | null;
   onLogout(): void;
   onAccountDeleted(message: string): void;
 }) {
@@ -26,11 +28,13 @@ export function SettingsScreen(props: {
   const [importText, setImportText] = useState('');
   const [importSource, setImportSource] = useState<'claude' | 'chatgpt' | 'gemini' | 'generic'>('claude');
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [calendarLinks, setCalendarLinks] = useState<CalendarLink[]>([]);
 
   const refresh = async () => {
     try {
       setConsents(await props.api.getConsents());
       setProfile(await props.api.getProfile());
+      setCalendarLinks(await props.api.getCalendarLinks());
       setError(null);
     } catch (err) {
       setError('Offline — consent settings need a connection.');
@@ -39,6 +43,25 @@ export function SettingsScreen(props: {
   useEffect(() => {
     void refresh();
   }, []);
+
+  const removeRoutine = async (label: string) => {
+    await props.api.deleteRoutine(label);
+    await refresh();
+  };
+
+  const describePush = (status?: PushStatus | null): string => {
+    if (!status) return 'Checking…';
+    switch (status.state) {
+      case 'registered':
+        return 'Enabled — reminders will buzz this device.';
+      case 'no-permission':
+        return 'Off — notification permission was denied. Enable it in your phone’s system settings.';
+      case 'unsupported':
+        return 'Not available on this platform.';
+      case 'failed':
+        return `Couldn’t register (${status.reason}). Reminders will only show inside the app.`;
+    }
+  };
 
   const runImport = async () => {
     setImportStatus('Processing… your export is parsed in memory and never stored.');
@@ -132,6 +155,46 @@ export function SettingsScreen(props: {
         </View>
       ))}
       {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      <Text style={styles.section}>Notifications</Text>
+      <Text style={styles.detail}>{describePush(props.pushStatus)}</Text>
+
+      <Text style={styles.section}>Calendar</Text>
+      {calendarLinks.length === 0 ? (
+        <Text style={styles.detail}>
+          No external calendar connected. Major items (meetings, appointments) still get a block on
+          Scrible’s own internal calendar — everything else stays reminder-only. Google/Outlook sync:
+          coming soon.
+        </Text>
+      ) : (
+        calendarLinks.map((l) => (
+          <Text key={l.id} style={styles.detail}>
+            Connected: {l.provider} ({l.accountId})
+          </Text>
+        ))
+      )}
+
+      {profile?.attributes.routines?.length ? (
+        <>
+          <Text style={styles.section}>Your routine</Text>
+          <Text style={styles.detail}>Learned from what you’ve told Scrible — used to resolve times like “after work”.</Text>
+          {profile.attributes.routines.map((r) => (
+            <View key={r.label} style={styles.row}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>{r.label}</Text>
+                <Text style={styles.detail}>
+                  {(r.days?.length ? r.days.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join('/') : 'every day') +
+                    ' · ' +
+                    (r.endHour != null ? `${r.startHour}:00–${r.endHour}:00` : `~${r.startHour}:00`)}
+                </Text>
+              </View>
+              <Pressable onPress={() => void removeRoutine(r.label)}>
+                <Text style={styles.buttonGhostText}>Remove</Text>
+              </Pressable>
+            </View>
+          ))}
+        </>
+      ) : null}
 
       <Text style={styles.section}>Personalization</Text>
       {consents.chat_import?.granted ? (

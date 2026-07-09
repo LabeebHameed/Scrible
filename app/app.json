@@ -34,7 +34,25 @@
           "speechRecognitionPermission": "Scrible transcribes your voice on this device to create tasks, ideas, and reminders."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "ScribleCapture",
+              "label": "Scrible — Voice Capture",
+              "description": "Tap to capture a thought by voice",
+              "minWidth": "80dp",
+              "minHeight": "80dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 1,
+              "resizeMode": "none",
+              "updatePeriodMillis": 0
+            }
+          ]
+        }
+      ]
     ],
     "extra": {
       "eas": {

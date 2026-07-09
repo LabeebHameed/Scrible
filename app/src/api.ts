@@ -1,6 +1,37 @@
 /** Thin typed client for the Scrible backend API v1. */
 import type { ChangeRow, Item, SyncOp } from './types';
 
+export interface RoutineBlock {
+  label: string;
+  days?: number[];
+  startHour: number;
+  endHour?: number;
+}
+
+export interface DeviceView {
+  id: string;
+  platform: string;
+  hasPushToken: boolean;
+  lastSeen: number;
+  createdAt: number;
+}
+
+export interface ScheduleBlock {
+  id: string;
+  itemId: string;
+  start: number;
+  end: number;
+  state: string;
+  rationale: string | null;
+  external: boolean;
+}
+
+export interface CalendarLink {
+  id: string;
+  provider: string;
+  accountId: string;
+}
+
 export interface ApiClient {
   signup(email: string, password: string): Promise<{ token: string }>;
   login(email: string, password: string): Promise<{ token: string }>;
@@ -19,10 +50,14 @@ export interface ApiClient {
   getProfile(): Promise<ProfileView | null>;
   patchProfile(edits: Record<string, unknown>): Promise<void>;
   deleteProfile(): Promise<{ confirmation: string }>;
+  deleteRoutine(label: string): Promise<void>;
   importChats(source: string, content: string): Promise<{ profile: Record<string, unknown> }>;
   sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>): Promise<void>;
-  registerDevice(platform: string, pushToken: string): Promise<void>;
+  registerDevice(platform: string, pushToken: string, deviceId?: string): Promise<{ id: string }>;
+  getDevices(): Promise<DeviceView[]>;
   markReminderSeen(reminderId: string): Promise<void>;
+  getCalendarLinks(): Promise<CalendarLink[]>;
+  getSchedule(): Promise<ScheduleBlock[]>;
 }
 
 export interface ProfileView {
@@ -31,6 +66,7 @@ export interface ProfileView {
     verbosity?: string;
     decompositionGranularity?: string;
     vocabulary?: string[];
+    routines?: RoutineBlock[];
   };
   overrides: Record<string, unknown>;
   sources: string[];
@@ -112,16 +148,28 @@ export class HttpApi implements ApiClient {
   async deleteProfile() {
     return this.req<{ confirmation: string }>('DELETE', '/v1/profile');
   }
+  async deleteRoutine(label: string) {
+    await this.req('DELETE', `/v1/profile/routines/${encodeURIComponent(label)}`);
+  }
   async importChats(source: string, content: string) {
     return this.req<{ profile: Record<string, unknown> }>('POST', '/v1/imports', { source, content });
   }
   async sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>) {
     await this.req('POST', '/v1/analytics/events', { events });
   }
-  async registerDevice(platform: string, pushToken: string) {
-    await this.req('POST', '/v1/devices', { platform, pushToken });
+  async registerDevice(platform: string, pushToken: string, deviceId?: string) {
+    return this.req<{ id: string }>('POST', '/v1/devices', { platform, pushToken, deviceId });
+  }
+  async getDevices() {
+    return this.req<DeviceView[]>('GET', '/v1/devices');
   }
   async markReminderSeen(reminderId: string) {
     await this.req('POST', `/v1/reminders/${reminderId}/seen`);
+  }
+  async getCalendarLinks() {
+    return this.req<CalendarLink[]>('GET', '/v1/calendar/links');
+  }
+  async getSchedule() {
+    return this.req<ScheduleBlock[]>('GET', '/v1/schedule');
   }
 }

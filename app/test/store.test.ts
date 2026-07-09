@@ -61,12 +61,24 @@ function fakeApi(): ApiClient & {
     async deleteProfile() {
       return { confirmation: '' };
     },
+    async deleteRoutine() {},
     async importChats() {
       return { profile: {} };
     },
     async sendAnalytics() {},
-    async registerDevice() {},
+    async registerDevice() {
+      return { id: 'device-1' };
+    },
+    async getDevices() {
+      return [];
+    },
     async markReminderSeen() {},
+    async getCalendarLinks() {
+      return [];
+    },
+    async getSchedule() {
+      return [];
+    },
   };
 }
 

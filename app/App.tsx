@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { HttpApi } from './src/api';
@@ -8,9 +9,10 @@ import { AuthScreen } from './src/screens/Auth';
 import { CaptureScreen } from './src/screens/Capture';
 import { QueueScreen } from './src/screens/Queue';
 import { ActivityScreen } from './src/screens/Activity';
+import { ScheduleScreen } from './src/screens/Schedule';
 import { SettingsScreen } from './src/screens/Settings';
 import { configureAnalytics, surface, track } from './src/analytics';
-import { setupPushNotifications } from './src/push';
+import { setupPushNotifications, type PushStatus } from './src/push';
 import { colors } from './src/theme';
 
 const API_URL =
@@ -19,7 +21,7 @@ const API_URL =
 
 const SYNC_INTERVAL_MS = 5000;
 
-type Tab = 'capture' | 'queue' | 'activity' | 'settings';
+type Tab = 'capture' | 'queue' | 'schedule' | 'activity' | 'settings';
 
 export default function App() {
   const api = useMemo(() => new HttpApi(API_URL), []);
@@ -29,6 +31,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('capture');
   const [version, setVersion] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<PushStatus | null>(null);
+  const [captureRequest, setCaptureRequest] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -53,6 +57,22 @@ export default function App() {
 
   useEffect(() => store.subscribe(() => setVersion((v) => v + 1)), [store]);
 
+  // Deep links (widget tap, `scrible://capture?autostart=1`) jump to Capture and, if
+  // requested, start recording immediately. `addEventListener` fires on every tap even
+  // for a repeated identical URL — deliberately not `Linking.useURL()`, which dedupes.
+  useEffect(() => {
+    const handle = (url: string | null) => {
+      if (!url) return;
+      const { hostname, path, queryParams } = Linking.parse(url);
+      if (hostname !== 'capture' && path !== 'capture') return;
+      setTab('capture');
+      if (queryParams?.autostart === '1') setCaptureRequest((n) => n + 1);
+    };
+    void Linking.getInitialURL().then(handle);
+    const sub = Linking.addEventListener('url', (e) => handle(e.url));
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     if (!token) return;
     timer.current = setInterval(() => void store.sync(), SYNC_INTERVAL_MS);
@@ -65,7 +85,7 @@ export default function App() {
   // login/signup, since both paths set `token`.
   useEffect(() => {
     if (!token) return;
-    void setupPushNotifications(api);
+    void setupPushNotifications(api).then(setPushStatus);
   }, [token, api]);
 
   const authenticate = async (mode: 'login' | 'signup', email: string, password: string) => {
@@ -103,13 +123,15 @@ export default function App() {
     <View style={styles.root}>
       <StatusBar style="light" />
       <View style={{ flex: 1 }}>
-        {tab === 'capture' ? <CaptureScreen store={store} api={api} /> : null}
+        {tab === 'capture' ? <CaptureScreen store={store} api={api} autoStartSignal={captureRequest} /> : null}
         {tab === 'queue' ? <QueueScreen store={store} version={version} /> : null}
+        {tab === 'schedule' ? <ScheduleScreen store={store} api={api} /> : null}
         {tab === 'activity' ? <ActivityScreen store={store} api={api} version={version} /> : null}
         {tab === 'settings' ? (
           <SettingsScreen
             api={api}
             store={store}
+            pushStatus={pushStatus}
             onLogout={() => void logout()}
             onAccountDeleted={(message) => {
               setNotice(message);
@@ -123,6 +145,7 @@ export default function App() {
           [
             ['queue', 'Queue'],
             ['capture', 'Capture'],
+            ['schedule', 'Schedule'],
             ['activity', 'Activity'],
             ['settings', 'Settings'],
           ] as Array<[Tab, string]>

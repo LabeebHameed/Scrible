@@ -34,11 +34,13 @@ export function registerDevices(app: FastifyInstance, db: Db): void {
 
   app.get('/v1/devices', { preHandler: app.authenticate }, async (req) => {
     const rows = (await db
-      .prepare('SELECT id, platform, capabilities, last_seen, created_at FROM devices WHERE user_id = ?')
+      .prepare('SELECT id, platform, push_token, capabilities, last_seen, created_at FROM devices WHERE user_id = ?')
       .all(req.userId)) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id,
       platform: r.platform,
+      // Never the token itself over the API — only whether one is on file.
+      hasPushToken: r.push_token != null,
       capabilities: JSON.parse(String(r.capabilities)),
       lastSeen: r.last_seen,
       createdAt: r.created_at,
