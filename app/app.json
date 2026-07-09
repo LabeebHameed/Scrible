@@ -9,11 +9,18 @@
     "backgroundColor": "#0E0F13",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.scrible.app"
+      "bundleIdentifier": "com.scrible.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Scrible transcribes your voice on this device to create tasks, ideas, and reminders.",
+        "NSMicrophoneUsageDescription": "Scrible uses the microphone so you can capture tasks, ideas, and reminders by speaking."
+      }
     },
     "android": {
       "package": "com.scrible.app",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro"
@@ -27,6 +34,12 @@
           "speechRecognitionPermission": "Scrible transcribes your voice on this device to create tasks, ideas, and reminders."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "08a730b6-405c-4c01-a387-9259e835b6df"
+      }
+    },
+    "owner": "labeeb_hameed"
   }
 }
