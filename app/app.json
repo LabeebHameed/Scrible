@@ -18,6 +18,7 @@
     "android": {
       "package": "com.scrible.app",
       "edgeToEdgeEnabled": true,
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ]
