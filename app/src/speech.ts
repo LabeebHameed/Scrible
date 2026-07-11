@@ -69,17 +69,28 @@ async function startNative(h: DictationHandlers): Promise<DictationSession | nul
       h.onError('microphone permission denied');
       return null;
     }
-    let latest = '';
+    // `continuous: true` on Android delivers each post-pause segment as its OWN
+    // result batch (not the running transcript) — each `result` event only covers
+    // speech since the last finalized segment. Must accumulate finalized segments
+    // ourselves (mirroring startWeb below) or every pause wipes out everything said
+    // before it, keeping only the most recent segment.
+    let finalized = '';
+    let interim = '';
     const resultSub = ExpoSpeechRecognitionModule.addListener('result', (event) => {
       const transcript = event.results?.[0]?.transcript ?? '';
-      latest = transcript;
-      h.onPartial(transcript);
+      if (event.isFinal) {
+        finalized = `${finalized} ${transcript}`.trim();
+        interim = '';
+      } else {
+        interim = transcript;
+      }
+      h.onPartial(`${finalized} ${interim}`.trim());
     });
     const endSub = ExpoSpeechRecognitionModule.addListener('end', () => {
       resultSub.remove();
       endSub.remove();
       errSub.remove();
-      h.onFinal(latest.trim());
+      h.onFinal(`${finalized} ${interim}`.trim());
     });
     const errSub = ExpoSpeechRecognitionModule.addListener('error', (event) => {
       h.onError(event.message ?? event.error ?? 'speech error');

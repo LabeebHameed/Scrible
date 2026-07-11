@@ -3,6 +3,10 @@
  * device's push token with the backend and wires notification taps back to
  * `POST /v1/reminders/:id/seen` so tapping a reminder stops its re-nagging.
  *
+ * Reminders use a 'reminder' notification category with explicit Stop/Snooze
+ * actions (alarm-like: an explicit choice, not just swiping the notification away)
+ * — see REMINDER_CATEGORY below.
+ *
  * Android needs an FCM v1 credential uploaded to the EAS project, AND a
  * google-services.json baked into the build (app.json `android.googleServicesFile`)
  * before a real notification is actually delivered — registration/tap-handling here
@@ -15,6 +19,8 @@ import Constants from 'expo-constants';
 import type { ApiClient } from './api';
 
 const DEVICE_ID_KEY = 'scrible.deviceId';
+const REMINDER_CATEGORY = 'reminder';
+const SNOOZE_MINUTES = 10;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -37,7 +43,7 @@ function reminderIdFrom(response: Notifications.NotificationResponse | null): st
   return typeof data?.reminderId === 'string' ? data.reminderId : null;
 }
 
-/** Request permission, register this device's push token, and wire tap → seen. */
+/** Request permission, register this device's push token, and wire tap/Stop/Snooze. */
 export async function setupPushNotifications(api: ApiClient): Promise<PushStatus> {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return { state: 'unsupported' };
 
@@ -49,6 +55,13 @@ export async function setupPushNotifications(api: ApiClient): Promise<PushStatus
         importance: Notifications.AndroidImportance.MAX,
       });
     }
+    // Explicit Stop/Snooze buttons on reminder notifications, instead of relying on
+    // an ambiguous swipe-to-dismiss — matches "alarm" behavior: you choose, it
+    // doesn't just quietly go away.
+    await Notifications.setNotificationCategoryAsync(REMINDER_CATEGORY, [
+      { identifier: 'STOP', buttonTitle: 'Stop' },
+      { identifier: 'SNOOZE', buttonTitle: `Snooze ${SNOOZE_MINUTES}m` },
+    ]);
 
     const perm = await Notifications.getPermissionsAsync();
     let granted = perm.granted;
@@ -74,7 +87,15 @@ export async function setupPushNotifications(api: ApiClient): Promise<PushStatus
 
   const ack = (response: Notifications.NotificationResponse | null) => {
     const reminderId = reminderIdFrom(response);
-    if (reminderId) void api.markReminderSeen(reminderId).catch(() => {});
+    if (!reminderId) return;
+    if (response?.actionIdentifier === 'SNOOZE') {
+      // Re-arms delivery later server-side; must NOT also mark seen, or it would
+      // never re-fire (see backend ReminderScheduler.snooze).
+      void api.snoozeReminder(reminderId, SNOOZE_MINUTES).catch(() => {});
+    } else {
+      // Plain tap or the explicit Stop action — both mean "dealt with".
+      void api.markReminderSeen(reminderId).catch(() => {});
+    }
   };
 
   // Cold start: the app may have been launched by tapping a notification.

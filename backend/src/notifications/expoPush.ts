@@ -8,7 +8,7 @@
  * it, Expo's API accepts the request but the notification never reaches the device.
  * That's a one-time external setup step, not something this code can do.
  */
-import type { PushSender } from './index.js';
+import type { PushSender, PushSendOpts } from './index.js';
 
 export class ExpoPushSender implements PushSender {
   channel = 'expo-push';
@@ -17,7 +17,7 @@ export class ExpoPushSender implements PushSender {
     return platform === 'ios' || platform === 'android';
   }
 
-  async send(deviceToken: string | null, title: string, body: string, data?: Record<string, unknown>): Promise<void> {
+  async send(deviceToken: string | null, title: string, body: string, opts?: PushSendOpts): Promise<void> {
     if (!deviceToken) return;
     const res = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
@@ -28,7 +28,8 @@ export class ExpoPushSender implements PushSender {
         body,
         sound: 'default',
         priority: 'high',
-        data: data ?? {},
+        data: opts?.data ?? {},
+        ...(opts?.categoryId ? { categoryId: opts.categoryId } : {}),
       }),
     });
     if (!res.ok) {

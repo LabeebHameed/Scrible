@@ -25,11 +25,15 @@ const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'frida
 export function parseTimeIntent(text: string, now = new Date()): TimeIntent | null {
   const t = text.toLowerCase();
 
-  const rel = t.match(/\bin (\d+) (minute|hour|day|week)s?\b/);
-  if (rel) {
-    const n = Number(rel[1]);
+  // Covers both "in 5 minutes" and vaguer-but-still-unambiguous forms like "in the
+  // next minute" / "in a few hours" — these must resolve deterministically, never
+  // via an LLM guess, since a wrong guess here fires a reminder at a hallucinated
+  // time instead of the one actually meant.
+  const rel = t.match(/\bin (?:(?<n>\d+)|(?<word>a|the next|a few|a couple(?: of)?)) (?<unit>minute|hour|day|week)s?\b/);
+  if (rel?.groups) {
+    const n = rel.groups.n ? Number(rel.groups.n) : /few|couple/.test(rel.groups.word ?? '') ? 3 : 1;
     const unitMs = { minute: 60_000, hour: 3_600_000, day: 86_400_000, week: 604_800_000 }[
-      rel[2] as 'minute' | 'hour' | 'day' | 'week'
+      rel.groups.unit as 'minute' | 'hour' | 'day' | 'week'
     ];
     return { at: now.getTime() + n * unitMs, phrase: rel[0] };
   }
@@ -87,6 +91,31 @@ export function parseTimeIntent(text: string, now = new Date()): TimeIntent | nu
     return { at: target.getTime(), phrase: timeMatch[0] };
   }
   return null;
+}
+
+/**
+ * Merge the model's time resolution with the deterministic parser — the parser
+ * ALWAYS wins when it can parse the text at all, since it can't hallucinate; the
+ * model's timeAtIso is only trusted for genuinely fuzzy/routine-anchored phrasing
+ * ("after work", "next time I'm at the gym") that the parser can't handle at all.
+ * Without this, a model that mis-resolves e.g. "in the next minute" into some
+ * plausible-sounding but wrong absolute date/time silently overrides a correct,
+ * cheap, deterministic answer.
+ */
+export function resolveTimeIntent(
+  text: string,
+  model: { timePhrase: string | null; timeAtIso: string | null; recurrence: string | null },
+): TimeIntent | null {
+  const heuristic = parseTimeIntent(text);
+  let at = heuristic?.at;
+  if (at == null && model.timeAtIso) {
+    const parsed = Date.parse(model.timeAtIso);
+    if (!Number.isNaN(parsed)) at = parsed;
+  }
+  const phrase = model.timePhrase ?? heuristic?.phrase;
+  const recurrence = model.recurrence ?? heuristic?.recurrence;
+  if (at == null && !phrase) return null;
+  return { ...(at != null ? { at } : {}), ...(phrase ? { phrase } : {}), ...(recurrence ? { recurrence } : {}) };
 }
 
 /**

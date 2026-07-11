@@ -19,7 +19,7 @@ import type {
   MatchDoneInput,
   MatchDoneOutput,
 } from '../contracts.js';
-import { parseTimeIntent, cleanTitle } from './heuristic.js';
+import { cleanTitle, resolveTimeIntent } from './heuristic.js';
 import { classifyPrompt, decomposePrompt, confirmPrompt, MATCH_DONE_PROMPT, DERIVE_PROFILE_PROMPT } from './prompts.js';
 import { createUsageTracker, type TokenUsage } from './usageTracker.js';
 
@@ -118,25 +118,15 @@ export class AnthropicProvider {
         },
       },
     );
-    let at: number | undefined;
-    if (out.timeAtIso) {
-      const parsed = Date.parse(out.timeAtIso);
-      if (!Number.isNaN(parsed)) at = parsed;
-    }
-    // Model resolves the phrase; heuristic regex is the safety net.
-    const timeIntent =
-      at || out.timePhrase
-        ? {
-            ...(at ? { at } : parseTimeIntent(input.text) ?? {}),
-            ...(out.timePhrase ? { phrase: out.timePhrase } : {}),
-            ...(out.recurrence ? { recurrence: out.recurrence } : {}),
-          }
-        : null;
+    // Heuristic parser wins whenever it can parse the text at all — it can't
+    // hallucinate; the model's timeAtIso only fills in for phrasing the parser can't
+    // handle (fuzzy/routine-anchored times like "after work").
+    const timeIntent = resolveTimeIntent(input.text, out);
     const result: ClassifyOutput = {
       type: out.type,
       confidence: Math.max(0, Math.min(1, out.confidence)),
       title: out.title.trim() ? out.title.slice(0, 80) : cleanTitle(input.text),
-      timeIntent: timeIntent && (timeIntent.at || timeIntent.phrase) ? timeIntent : null,
+      timeIntent,
       contextTag: out.computerAction || out.appTrigger ? 'computer-action' : null,
       appTrigger: out.appTrigger ? out.appTrigger.toLowerCase().slice(0, 40) : null,
       importance: out.importance === 'major' ? 'major' : 'normal',

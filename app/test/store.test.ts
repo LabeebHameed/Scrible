@@ -73,6 +73,7 @@ function fakeApi(): ApiClient & {
       return [];
     },
     async markReminderSeen() {},
+    async snoozeReminder() {},
     async getCalendarLinks() {
       return [];
     },

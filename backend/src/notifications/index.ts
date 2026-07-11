@@ -14,11 +14,17 @@ import type { Db } from '../lib/db.js';
 import type { SyncEngine } from '../modules/sync.js';
 import type { Orchestrator } from '../ai/orchestrator.js';
 
+export interface PushSendOpts {
+  data?: Record<string, unknown>;
+  /** Client-registered notification category (e.g. 'reminder' → Stop/Snooze actions). */
+  categoryId?: string;
+}
+
 export interface PushSender {
   /** e.g. 'apns' | 'fcm' | 'outbox' */
   channel: string;
   supports(platform: string): boolean;
-  send(deviceToken: string | null, title: string, body: string, data?: Record<string, unknown>): Promise<void>;
+  send(deviceToken: string | null, title: string, body: string, opts?: PushSendOpts): Promise<void>;
 }
 
 /** Dev/test sender — delivery is observable in the push_outbox table. */
@@ -48,7 +54,7 @@ export class NotificationDispatcher {
     dedupKey: string,
     title: string,
     body: string,
-    opts: { respectQuietHours?: boolean; data?: Record<string, unknown> } = {},
+    opts: { respectQuietHours?: boolean; data?: Record<string, unknown>; categoryId?: string } = {},
   ): Promise<boolean> {
     const seen = await this.db
       .prepare('SELECT id FROM push_outbox WHERE user_id = ? AND dedup_key = ? LIMIT 1')
@@ -73,7 +79,7 @@ export class NotificationDispatcher {
         .run(randomUUID(), userId, String(device.id), channel, title, body, dedupKey, Date.now());
       if (sender && sender.channel !== 'outbox') {
         try {
-          await sender.send(device.push_token as string | null, title, body, opts.data);
+          await sender.send(device.push_token as string | null, title, body, { data: opts.data, categoryId: opts.categoryId });
         } catch {
           /* provider failure — outbox row stands as the retry record */
         }
@@ -208,7 +214,7 @@ export class ReminderScheduler {
         `reminder:${String(trigger.id)}:${now}`,
         'Scrible',
         message,
-        { data: { reminderId: String(trigger.id) } },
+        { data: { reminderId: String(trigger.id) }, categoryId: 'reminder' },
       );
       await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(trigger.id));
       if (sent) delivered++;

@@ -56,6 +56,7 @@ export interface ApiClient {
   registerDevice(platform: string, pushToken: string, deviceId?: string): Promise<{ id: string }>;
   getDevices(): Promise<DeviceView[]>;
   markReminderSeen(reminderId: string): Promise<void>;
+  snoozeReminder(reminderId: string, minutes: number): Promise<void>;
   getCalendarLinks(): Promise<CalendarLink[]>;
   getSchedule(): Promise<ScheduleBlock[]>;
 }
@@ -165,6 +166,9 @@ export class HttpApi implements ApiClient {
   }
   async markReminderSeen(reminderId: string) {
     await this.req('POST', `/v1/reminders/${reminderId}/seen`);
+  }
+  async snoozeReminder(reminderId: string, minutes: number) {
+    await this.req('POST', `/v1/reminders/${reminderId}/snooze`, { minutes });
   }
   async getCalendarLinks() {
     return this.req<CalendarLink[]>('GET', '/v1/calendar/links');

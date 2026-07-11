@@ -272,6 +272,54 @@ test('classify: a stated routine fact is returned structured, not treated as an 
   });
 });
 
+test('classify: a heuristic-parseable relative time wins over a hallucinated model timestamp', async () => {
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const now = Date.now();
+  // The model invents a plausible-sounding but wrong absolute date — exactly the
+  // real-world failure mode: "in the next minute" got resolved to some Monday
+  // afternoon meeting time out of thin air.
+  const hallucinated = new Date(now + 3 * 24 * 3600_000).toISOString();
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'reminder',
+                confidence: 0.9,
+                title: 'Attend meeting',
+                timePhrase: 'in the next minute',
+                timeAtIso: hallucinated,
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'normal',
+                routineFact: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: 'I have a meeting in the next minute remind me',
+      context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.ok(out.timeIntent?.at, 'a time was resolved');
+    assert.ok(
+      Math.abs(out.timeIntent!.at! - (now + 60_000)) < 10_000,
+      `expected ~1 minute from now, got ${new Date(out.timeIntent!.at!).toISOString()} (model hallucinated ${hallucinated})`,
+    );
+  });
+});
+
 test('classify: importance and routineFact default safely when the LLM omits them', async () => {
   await resetTestSchema();
   const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
