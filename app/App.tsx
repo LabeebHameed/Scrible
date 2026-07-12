@@ -13,6 +13,7 @@ import { ScheduleScreen } from './src/screens/Schedule';
 import { SettingsScreen } from './src/screens/Settings';
 import { configureAnalytics, surface, track } from './src/analytics';
 import { setupPushNotifications, type PushStatus } from './src/push';
+import { handleAlarmEvent, setupAlarms, syncAlarms } from './src/alarms';
 import { colors } from './src/theme';
 
 const API_URL =
@@ -86,6 +87,29 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     void setupPushNotifications(api).then(setPushStatus);
+  }, [token, api]);
+
+  // Local alarms mirror server reminders so they ring offline with the app killed.
+  // Reconciled once a minute — NOT on the 5s store sync, /v1/reminders doesn't need it.
+  useEffect(() => {
+    if (!token) return;
+    let unsub: (() => void) | undefined;
+    void setupAlarms().then(async () => {
+      void syncAlarms(api);
+      if (Platform.OS === 'android') {
+        try {
+          const { default: notifee } = await import('react-native-notify-kit');
+          unsub = notifee.onForegroundEvent(({ type, detail }) => void handleAlarmEvent(type, detail, api));
+        } catch {
+          /* module unavailable (Expo Go) — background handler covers real builds */
+        }
+      }
+    });
+    const interval = setInterval(() => void syncAlarms(api), 60_000);
+    return () => {
+      clearInterval(interval);
+      unsub?.();
+    };
   }, [token, api]);
 
   const authenticate = async (mode: 'login' | 'signup', email: string, password: string) => {

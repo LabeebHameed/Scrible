@@ -72,6 +72,9 @@ function fakeApi(): ApiClient & {
     async getDevices() {
       return [];
     },
+    async reminders() {
+      return [];
+    },
     async markReminderSeen() {},
     async snoozeReminder() {},
     async getCalendarLinks() {

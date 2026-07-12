@@ -249,6 +249,14 @@ export class SyncEngine {
             'UPDATE items SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND user_id = ?',
           )
           .run('done', op.ts || Date.now(), Date.now(), op.entityId, userId);
+        // A completed item's pending reminder is acknowledged too: it must drop out
+        // of GET /v1/reminders so devices cancel their local alarms on next sync,
+        // and the server re-nag loop stops without waiting for the next tick.
+        await this.db
+          .prepare(
+            'UPDATE reminder_triggers SET seen_at = ?, updated_at = ? WHERE item_id = ? AND user_id = ? AND seen_at IS NULL',
+          )
+          .run(Date.now(), Date.now(), op.entityId, userId);
         await this.emitItem(userId, op.entityId);
         return 'completed';
       }

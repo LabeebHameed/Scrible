@@ -54,7 +54,17 @@ export class NotificationDispatcher {
     dedupKey: string,
     title: string,
     body: string,
-    opts: { respectQuietHours?: boolean; data?: Record<string, unknown>; categoryId?: string } = {},
+    opts: {
+      respectQuietHours?: boolean;
+      data?: Record<string, unknown>;
+      categoryId?: string;
+      /**
+       * Skip the actual push to devices that ring their own local alarms
+       * (capabilities.localAlarms) — used for a reminder's FIRST delivery so the
+       * phone isn't double-alerted (alarm + push). Re-nags still push everywhere.
+       */
+      suppressPushForLocalAlarmDevices?: boolean;
+    } = {},
   ): Promise<boolean> {
     const seen = await this.db
       .prepare('SELECT id FROM push_outbox WHERE user_id = ? AND dedup_key = ? LIMIT 1')
@@ -64,7 +74,7 @@ export class NotificationDispatcher {
     if (opts.respectQuietHours && (await this.inQuietHours(userId))) return false;
 
     const devices = (await this.db
-      .prepare('SELECT id, platform, push_token FROM devices WHERE user_id = ?')
+      .prepare('SELECT id, platform, push_token, capabilities FROM devices WHERE user_id = ?')
       .all(userId)) as Array<Record<string, unknown>>;
     const targets = devices.length > 0 ? devices : [{ id: 'no-device', platform: 'none', push_token: null }];
     for (const device of targets) {
@@ -77,7 +87,15 @@ export class NotificationDispatcher {
           'INSERT INTO push_outbox (id, user_id, device_id, channel, title, body, dedup_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         )
         .run(randomUUID(), userId, String(device.id), channel, title, body, dedupKey, Date.now());
-      if (sender && sender.channel !== 'outbox') {
+      let ringsLocally = false;
+      if (opts.suppressPushForLocalAlarmDevices) {
+        try {
+          ringsLocally = (JSON.parse(String(device.capabilities ?? '{}')) as { localAlarms?: boolean }).localAlarms === true;
+        } catch {
+          /* malformed capabilities — treat as push-only */
+        }
+      }
+      if (sender && sender.channel !== 'outbox' && !ringsLocally) {
         try {
           await sender.send(device.push_token as string | null, title, body, { data: opts.data, categoryId: opts.categoryId });
         } catch {
@@ -214,7 +232,13 @@ export class ReminderScheduler {
         `reminder:${String(trigger.id)}:${now}`,
         'Scrible',
         message,
-        { data: { reminderId: String(trigger.id) }, categoryId: 'reminder' },
+        {
+          data: { reminderId: String(trigger.id) },
+          categoryId: 'reminder',
+          // The phone rings this itself via a local alarm at fire time — pushing too
+          // would double-alert. Re-nags (not first delivery) push everywhere.
+          suppressPushForLocalAlarmDevices: isFirstDelivery,
+        },
       );
       await this.db.prepare('UPDATE reminder_triggers SET delivered_at = ?, updated_at = ? WHERE id = ?').run(now, now, String(trigger.id));
       if (sent) delivered++;

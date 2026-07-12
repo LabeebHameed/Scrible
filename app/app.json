@@ -20,7 +20,10 @@
       "edgeToEdgeEnabled": true,
       "googleServicesFile": "./google-services.json",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ]
     },
     "web": {
@@ -36,6 +39,7 @@
         }
       ],
       "expo-notifications",
+      "react-native-notify-kit",
       [
         "react-native-android-widget",
         {

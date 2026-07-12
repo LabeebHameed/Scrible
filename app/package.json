@@ -29,6 +29,7 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.0",
     "react-native-android-widget": "^0.20.3",
+    "react-native-notify-kit": "^10.4.8",
     "react-native-web": "^0.21.2"
   }
 }

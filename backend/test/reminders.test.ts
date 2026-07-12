@@ -152,6 +152,63 @@ test('completing an item after first delivery stops further re-nagging', async (
   assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 1000), 0, 'completed reminder never re-nags');
 });
 
+test('completing an item acknowledges its pending trigger immediately (local alarms cancel on next sync)', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'r8', rawText: 'remind me to send the invoice in 1 minute', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+  await ctx.app.inject({ method: 'POST', url: '/v1/items/r8/complete', headers: auth(token) });
+
+  const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  assert.ok(trigger.seenAt, 'trigger acknowledged the moment the item completed, not at the next tick');
+});
+
+test('first delivery skips push for devices that ring their own local alarms; re-nags still push', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token, userId } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/devices',
+    headers: auth(token),
+    payload: { platform: 'android', pushToken: 'ExponentPushToken[test]', capabilities: { localAlarms: true } },
+  });
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'r9', rawText: 'remind me to stretch in 1 minute', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+  const [trigger] = (await ctx.app.inject({ method: 'GET', url: '/v1/reminders', headers: auth(token) })).json();
+  const fireTime = trigger.fireAt + 1000;
+
+  // Track real push attempts: expo-push sender would call fetch — stub it.
+  const original = globalThis.fetch;
+  let pushAttempts = 0;
+  globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+    if (String(args[0]).includes('exp.host')) {
+      pushAttempts++;
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }
+    return original(...args);
+  }) as typeof fetch;
+  try {
+    assert.equal(await ctx.reminders.tick(fireTime), 1, 'first delivery recorded');
+    assert.equal(pushAttempts, 0, 'no push on first delivery — the phone rings its own alarm');
+    assert.equal(await ctx.reminders.tick(fireTime + 5 * 60_000 + 1000), 1, 're-nag delivered');
+    assert.equal(pushAttempts, 1, 're-nag DOES push');
+  } finally {
+    globalThis.fetch = original;
+  }
+  const outbox = await ctx.db.prepare('SELECT * FROM push_outbox WHERE user_id = ?').all(userId);
+  assert.ok(outbox.length >= 2, 'outbox records both deliveries regardless of push suppression');
+});
+
 test('confirmation notifications respect quiet hours but reminders do not', async () => {
   const ctx = await testApp();
   const { token, userId } = await signup(ctx);

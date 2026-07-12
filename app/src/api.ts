@@ -32,6 +32,17 @@ export interface CalendarLink {
   accountId: string;
 }
 
+export interface ReminderView {
+  id: string;
+  itemId: string;
+  title: string;
+  fireAt: number;
+  recurrence: string | null;
+  snoozedUntil: number | null;
+  deliveredAt: number | null;
+  seenAt: number | null;
+}
+
 export interface ApiClient {
   signup(email: string, password: string): Promise<{ token: string }>;
   login(email: string, password: string): Promise<{ token: string }>;
@@ -55,6 +66,7 @@ export interface ApiClient {
   sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>): Promise<void>;
   registerDevice(platform: string, pushToken: string, deviceId?: string): Promise<{ id: string }>;
   getDevices(): Promise<DeviceView[]>;
+  reminders(): Promise<ReminderView[]>;
   markReminderSeen(reminderId: string): Promise<void>;
   snoozeReminder(reminderId: string, minutes: number): Promise<void>;
   getCalendarLinks(): Promise<CalendarLink[]>;
@@ -159,10 +171,20 @@ export class HttpApi implements ApiClient {
     await this.req('POST', '/v1/analytics/events', { events });
   }
   async registerDevice(platform: string, pushToken: string, deviceId?: string) {
-    return this.req<{ id: string }>('POST', '/v1/devices', { platform, pushToken, deviceId });
+    // localAlarms: this device rings reminders itself (see src/alarms.ts) — the
+    // server skips the first push to it so the user isn't double-alerted.
+    return this.req<{ id: string }>('POST', '/v1/devices', {
+      platform,
+      pushToken,
+      deviceId,
+      capabilities: { localAlarms: true },
+    });
   }
   async getDevices() {
     return this.req<DeviceView[]>('GET', '/v1/devices');
+  }
+  async reminders() {
+    return this.req<ReminderView[]>('GET', '/v1/reminders');
   }
   async markReminderSeen(reminderId: string) {
     await this.req('POST', `/v1/reminders/${reminderId}/seen`);
