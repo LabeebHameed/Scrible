@@ -1,5 +1,17 @@
 # SCRIBLE — Executable build plan: "the assistant, not an app"
 
+## ⚡ EXECUTION STATE (update this section as you work)
+
+- ✅ Slice A (offline alarms) — committed `eec0980`.
+- ✅ Slices B+C (agent timeline, 4x1 capture bar + Right-now widget) — `a17363e`.
+- ✅ Slice D (whole-day schedule + probe corpus/script) — `ef28cd0`.
+- ✅ Slice E (details pass: voice, haptics, empty states) — `b7f56ae`.
+- 🔶 Ship round (§8) — full suites green (90 backend / 4 app / 3 desktop, typecheck
+  clean); APK build launched. REMAINING: (1) user does Render Manual Deploy of latest
+  main, (2) run `node backend/scripts/probe.mjs` — must exit 0 — before trusting any
+  device test, (3) deliver APK URL + §8 device script, (4) file feedback as tasks.
+- Next phase candidates (§9): recall, morning briefing, `POST /v1/capture/audio`.
+
 This document is a complete, self-contained implementation spec. It assumes the
 executing model has NO memory of prior sessions. Everything needed — file paths, exact
 edits, commands, verification steps, known landmines — is written down. Follow it in
