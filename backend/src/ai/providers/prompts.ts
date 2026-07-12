@@ -42,7 +42,26 @@ Importance: set importance="major" only for things that belong on a glanceable c
 
 Routine facts: if the utterance states a recurring schedule fact about themselves rather than something to do ("I'm at college till 4 on weekdays", "I usually go to the gym around 4:30"), set routineFact to { label: short description, days: array of 0=Sun..6=Sat (omit/empty for every day), startHour: 0-23, endHour: 0-23 or omit if it's a point-in-time habit not a span } instead of treating it as a task/idea/reminder — leave the normal fields as reasonable neutral defaults in that case.
 
-Current local time: ${new Date().toISOString()} in timezone ${timezone}. Resolve relative times against that.`;
+Current time for this person: ${localNow(timezone)} (their timezone: ${timezone}; UTC now: ${new Date().toISOString()}). Resolve every relative/fuzzy time in THEIR clock — "at 12" means 12:00 where they live — and output timeAtIso as a full ISO-8601 timestamp with the correct UTC offset.`;
+}
+
+/** "Now" rendered in the user's own clock — the model must reason in their timezone,
+ * never the server's (a UTC server made "at 12" fire at 6:32 for an IST user). */
+function localNow(timezone: string): string {
+  try {
+    return new Date().toLocaleString('en-US', {
+      timeZone: timezone,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
+  } catch {
+    return new Date().toISOString();
+  }
 }
 
 export function decomposePrompt(input: DecomposeInput): string {

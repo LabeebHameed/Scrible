@@ -43,8 +43,9 @@ function reminderIdFrom(response: Notifications.NotificationResponse | null): st
   return typeof data?.reminderId === 'string' ? data.reminderId : null;
 }
 
-/** Request permission, register this device's push token, and wire tap/Stop/Snooze. */
-export async function setupPushNotifications(api: ApiClient): Promise<PushStatus> {
+/** Request permission, register this device's push token, and wire tap/Stop/Snooze.
+ * `localAlarms` must only be true when exact local alarms are VERIFIED working. */
+export async function setupPushNotifications(api: ApiClient, localAlarms = false): Promise<PushStatus> {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return { state: 'unsupported' };
 
   let status: PushStatus;
@@ -75,7 +76,7 @@ export async function setupPushNotifications(api: ApiClient): Promise<PushStatus
       const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
       const token = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
       const deviceId = (await AsyncStorage.getItem(DEVICE_ID_KEY)) ?? undefined;
-      const res = await api.registerDevice(Platform.OS, token.data, deviceId);
+      const res = await api.registerDevice(Platform.OS, token.data, deviceId, localAlarms);
       if (!deviceId) await AsyncStorage.setItem(DEVICE_ID_KEY, res.id);
       status = { state: 'registered' };
     }

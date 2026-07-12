@@ -45,6 +45,7 @@ function fakeApi(): ApiClient & {
     async voiceDone() {
       return { completed: null, message: '' };
     },
+    async setTimezone() {},
     async getConsents() {
       return {};
     },

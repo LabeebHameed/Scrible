@@ -13,7 +13,7 @@ import { ScheduleScreen } from './src/screens/Schedule';
 import { SettingsScreen } from './src/screens/Settings';
 import { configureAnalytics, surface, track } from './src/analytics';
 import { setupPushNotifications, type PushStatus } from './src/push';
-import { handleAlarmEvent, setupAlarms, syncAlarms } from './src/alarms';
+import { handleAlarmEvent, setupAlarms, syncAlarms, type AlarmStatus } from './src/alarms';
 import { colors } from './src/theme';
 
 const API_URL =
@@ -33,6 +33,7 @@ export default function App() {
   const [version, setVersion] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<PushStatus | null>(null);
+  const [alarmStatus, setAlarmStatus] = useState<AlarmStatus | null>(null);
   const [captureRequest, setCaptureRequest] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -93,20 +94,18 @@ export default function App() {
     };
   }, [token, store]);
 
-  // Register for push once signed in — covers both a restored session and a fresh
-  // login/signup, since both paths set `token`.
-  useEffect(() => {
-    if (!token) return;
-    void setupPushNotifications(api).then(setPushStatus);
-  }, [token, api]);
-
-  // Local alarms mirror server reminders so they ring offline with the app killed.
-  // Reconciled once a minute — NOT on the 5s store sync, /v1/reminders doesn't need it.
+  // Once signed in: alarms first (so push registration can truthfully report whether
+  // this device rings its own exact alarms), then push, then the timezone handshake.
+  // Local alarms mirror server reminders (offline, app-killed ringing), reconciled
+  // once a minute — NOT on the 5s store sync.
   useEffect(() => {
     if (!token) return;
     let unsub: (() => void) | undefined;
-    void setupAlarms().then(async () => {
-      void syncAlarms(api);
+    void (async () => {
+      const alarms = await setupAlarms();
+      setAlarmStatus(alarms);
+      void setupPushNotifications(api, alarms.state === 'exact').then(setPushStatus);
+      setAlarmStatus(await syncAlarms(api));
       if (Platform.OS === 'android') {
         try {
           const { default: notifee } = await import('react-native-notify-kit');
@@ -115,8 +114,16 @@ export default function App() {
           /* module unavailable (Expo Go) — background handler covers real builds */
         }
       }
-    });
-    const interval = setInterval(() => void syncAlarms(api), 60_000);
+    })();
+    // Teach the server this device's clock — time resolution happens server-side and
+    // must think in the user's timezone, not the server's.
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) void api.setTimezone(tz).catch(() => {});
+    } catch {
+      /* Intl unavailable — server keeps its stored value */
+    }
+    const interval = setInterval(() => void syncAlarms(api).then(setAlarmStatus), 60_000);
     return () => {
       clearInterval(interval);
       unsub?.();
@@ -167,6 +174,7 @@ export default function App() {
             api={api}
             store={store}
             pushStatus={pushStatus}
+            alarmStatus={alarmStatus}
             onLogout={() => void logout()}
             onAccountDeleted={(message) => {
               setNotice(message);

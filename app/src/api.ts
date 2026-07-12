@@ -53,6 +53,7 @@ export interface ApiClient {
     candidates?: Item[];
     message: string;
   }>;
+  setTimezone(timezone: string): Promise<void>;
   getConsents(): Promise<Record<string, { granted: boolean }>>;
   grantConsent(category: string): Promise<void>;
   revokeConsent(category: string): Promise<void>;
@@ -64,7 +65,7 @@ export interface ApiClient {
   deleteRoutine(label: string): Promise<void>;
   importChats(source: string, content: string): Promise<{ profile: Record<string, unknown> }>;
   sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>): Promise<void>;
-  registerDevice(platform: string, pushToken: string, deviceId?: string): Promise<{ id: string }>;
+  registerDevice(platform: string, pushToken: string, deviceId?: string, localAlarms?: boolean): Promise<{ id: string }>;
   getDevices(): Promise<DeviceView[]>;
   reminders(): Promise<ReminderView[]>;
   markReminderSeen(reminderId: string): Promise<void>;
@@ -133,6 +134,11 @@ export class HttpApi implements ApiClient {
       { utterance },
     );
   }
+  async setTimezone(timezone: string) {
+    // Without this every fuzzy time ("after work", "at 12") resolves in the server's
+    // clock (UTC), 5:30 off for IST users — the "asked at 12, set for 6:32" bug.
+    await this.req('PATCH', '/v1/me', { timezone });
+  }
   async getConsents() {
     return this.req<Record<string, { granted: boolean }>>('GET', '/v1/consents');
   }
@@ -170,14 +176,16 @@ export class HttpApi implements ApiClient {
   async sendAnalytics(events: Array<{ name: string; props: Record<string, unknown> }>) {
     await this.req('POST', '/v1/analytics/events', { events });
   }
-  async registerDevice(platform: string, pushToken: string, deviceId?: string) {
-    // localAlarms: this device rings reminders itself (see src/alarms.ts) — the
-    // server skips the first push to it so the user isn't double-alerted.
+  async registerDevice(platform: string, pushToken: string, deviceId?: string, localAlarms = false) {
+    // localAlarms means this device VERIFIABLY rings reminders itself (exact alarms
+    // enabled — see src/alarms.ts); the server then skips the first push to it so
+    // the user isn't double-alerted. Claiming it without verification means a missing
+    // Android permission turns into total silence — never send true optimistically.
     return this.req<{ id: string }>('POST', '/v1/devices', {
       platform,
       pushToken,
       deviceId,
-      capabilities: { localAlarms: true },
+      capabilities: { localAlarms },
     });
   }
   async getDevices() {

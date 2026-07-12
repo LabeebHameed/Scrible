@@ -33,9 +33,15 @@ const req = async (method, path, body, token) => {
   return res.json();
 };
 
+// Probe as an IST user — the timezone the real user lives in. Wall-clock corpus
+// lines ("at 12") must resolve in THIS clock, not the server's UTC.
+const TZ = process.env.PROBE_TZ ?? 'Asia/Kolkata';
 const email = `probe-${Date.now()}@example.com`;
-const { token } = await req('POST', '/v1/auth/signup', { email, password: 'ProbePass123!' });
-console.log(`probing ${BASE} as ${email}\n`);
+const { token } = await req('POST', '/v1/auth/signup', { email, password: 'ProbePass123!', timezone: TZ });
+console.log(`probing ${BASE} as ${email} (timezone ${TZ})\n`);
+
+const hourIn = (epochMs, tz) =>
+  Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(new Date(epochMs)));
 
 const failures = [];
 const rows = [];
@@ -78,6 +84,17 @@ for (let i = 0; i < corpus.length; i++) {
   }
   if (/go to the gym at 5:30/i.test(rawText) && (item.subtasks?.length ?? 0) > 0) {
     failures.push(`BUSYWORK DECOMPOSITION: "${rawText}" got ${item.subtasks.length} steps (should be 0)`);
+  }
+  if (/drink water at 12$/i.test(rawText)) {
+    if (!at) failures.push(`NO TIME RESOLVED for "at 12"`);
+    else {
+      const h = hourIn(at, TZ);
+      if (h !== 12 && h !== 0) {
+        failures.push(
+          `TIMEZONE BUG: "at 12" resolved to ${h}:xx in ${TZ} (${new Date(at).toISOString()}) — wall-clock times must resolve in the USER's timezone`,
+        );
+      }
+    }
   }
 }
 

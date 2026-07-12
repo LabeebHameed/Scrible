@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import type { ApiClient, CalendarLink, ProfileView } from '../api';
 import type { PushStatus } from '../push';
+import { requestExactAlarms, type AlarmStatus } from '../alarms';
 import { setAnalyticsEnabled } from '../analytics';
 import type { SyncStore } from '../store';
 import { colors } from '../theme';
@@ -19,6 +20,7 @@ export function SettingsScreen(props: {
   api: ApiClient;
   store: SyncStore;
   pushStatus?: PushStatus | null;
+  alarmStatus?: AlarmStatus | null;
   onLogout(): void;
   onAccountDeleted(message: string): void;
 }) {
@@ -158,6 +160,25 @@ export function SettingsScreen(props: {
 
       <Text style={styles.section}>Notifications</Text>
       <Text style={styles.detail}>{describePush(props.pushStatus)}</Text>
+
+      <Text style={styles.section}>Alarms</Text>
+      {props.alarmStatus?.state === 'exact' ? (
+        <Text style={styles.detail}>Exact alarms on — reminders ring on the second, even offline.</Text>
+      ) : props.alarmStatus?.state === 'inexact' ? (
+        <>
+          <Text style={styles.detail}>
+            Reminders will ring, but Android may delay them. Allow “Alarms & reminders” for on-the-second
+            alarms, then restart Scrible.
+          </Text>
+          <Pressable style={styles.buttonGhost} onPress={() => void requestExactAlarms()}>
+            <Text style={styles.buttonGhostText}>Allow exact alarms</Text>
+          </Pressable>
+        </>
+      ) : props.alarmStatus?.state === 'error' ? (
+        <Text style={styles.error}>Alarm trouble: {props.alarmStatus.reason}</Text>
+      ) : (
+        <Text style={styles.detail}>Checking…</Text>
+      )}
 
       <Text style={styles.section}>Calendar</Text>
       {calendarLinks.length === 0 ? (
