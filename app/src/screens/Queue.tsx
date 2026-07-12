@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import type { SyncStore } from '../store';
 import type { Item, ItemType } from '../types';
 import { colors, typeColor } from '../theme';
@@ -39,6 +40,7 @@ function ItemCard(props: { item: Item; store: SyncStore }) {
         <Pressable
           style={styles.check}
           onPress={() => {
+            if (Platform.OS !== 'web') void Haptics.selectionAsync().catch(() => {});
             track('item.completed', {
               type: item.type,
               surface,
@@ -115,7 +117,7 @@ export function QueueScreen(props: { store: SyncStore; version: number }) {
     <View style={styles.root}>
       <Text style={styles.heading}>Right now</Text>
       {queue.length === 0 ? (
-        <Text style={styles.empty}>Nothing queued — capture something.</Text>
+        <Text style={styles.empty}>Nothing on your mind — hold the mic and just talk. I'll sort it out.</Text>
       ) : (
         <FlatList
           data={showAll ? [...queue, ...rest] : queue}

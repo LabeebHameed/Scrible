@@ -273,9 +273,9 @@ export function SettingsScreen(props: {
       <Text style={styles.detail}>
         {pending === 0
           ? props.store.lastError
-            ? `Offline (${props.store.lastError}) — changes will sync when back online.`
-            : 'All changes synced.'
-          : `${pending} change${pending === 1 ? '' : 's'} waiting to sync.`}
+            ? "You're offline — everything is kept safe here and syncs the moment you're back."
+            : 'Everything is in sync.'
+          : `${pending} change${pending === 1 ? '' : 's'} kept safe — syncing when I can reach the server.`}
       </Text>
       <Pressable style={styles.buttonGhost} onPress={() => void props.store.sync()}>
         <Text style={styles.buttonGhostText}>Sync now</Text>
