@@ -37,6 +37,8 @@ export interface Item {
   status: ItemStatus;
   contextTag: string | null;
   appTrigger: string | null;
+  /** 'major' items also get a calendar block; everything still gets reminded. */
+  importance?: 'major' | 'normal';
   timeIntent: TimeIntent | null;
   summary: string | null;
   createdAt: number;

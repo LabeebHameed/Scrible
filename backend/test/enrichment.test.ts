@@ -256,6 +256,32 @@ test('a major item with an explicit time gets both a reminder and a calendar blo
   assert.equal(scheduleAfter.length, 1, 'normal item does not clutter the calendar');
 });
 
+test('enrichment streams staged updates through the change feed (understood, then final)', async () => {
+  const ctx = await testApp({ autoClassify: true });
+  const { token } = await signup(ctx);
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/v1/items',
+    headers: auth(token),
+    payload: { id: 'stage1', rawText: 'remind me to call mom tomorrow at 5pm', source: 'voice' },
+  });
+  await ctx.jobs.onIdle();
+
+  const { changes } = (await ctx.app.inject({ method: 'GET', url: '/v1/sync/changes?since=0', headers: auth(token) })).json();
+  const summaries = changes
+    .filter((c: { entityType: string; entityId: string }) => c.entityType === 'item' && c.entityId === 'stage1')
+    .map((c: { data: { summary: string | null } }) => c.data?.summary)
+    .filter(Boolean);
+  assert.ok(
+    summaries.some((s: string) => s.startsWith('Understood —')),
+    `interim "Understood" stage must ride the change feed, got: ${JSON.stringify(summaries)}`,
+  );
+  assert.ok(
+    summaries.length >= 2 && !summaries[summaries.length - 1].startsWith('Understood —'),
+    'final summary replaces the interim one',
+  );
+});
+
 test('queue orders explicit times first', async () => {
   const ctx = await testApp({ autoClassify: true });
   const { token } = await signup(ctx);

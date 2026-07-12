@@ -8,6 +8,7 @@ import type { AppContext } from './server.js';
 import type { ItemType } from './types.js';
 import { loadEffectiveProfile, recordRoutineFact } from './modules/profile.js';
 import { splitUtterance } from './ai/providers/heuristic.js';
+import { formatWhen } from './calendar/service.js';
 
 export function enableEnrichment(ctx: AppContext): void {
   if (!ctx.config.flags.autoClassify) return;
@@ -76,6 +77,22 @@ export function enableEnrichment(ctx: AppContext): void {
         await sync.audit(userId, 'item.routine_noted', 'item', itemId, { label: cls.routineFact.label }, true);
         return;
       }
+
+      // Staged update #1 — the moment understanding lands, the client sees it (the
+      // capture screen's agent timeline ticks "Understood — …" while decomposition
+      // is still running). Status stays 'processing' until the final update.
+      await sync.serverUpdateItem(userId, itemId, {
+        type: cls.type,
+        title: cls.title,
+        confidence: cls.confidence,
+        contextTag: cls.contextTag,
+        appTrigger: cls.appTrigger,
+        importance: cls.importance,
+        timeIntent: cls.timeIntent,
+        summary:
+          `Understood — ${cls.type}: “${cls.title}”` +
+          (cls.timeIntent?.at ? ` · ${formatWhen(cls.timeIntent.at)}` : ''),
+      });
 
       const dec = await orchestrator.run('decompose', {
         text: item.rawText,

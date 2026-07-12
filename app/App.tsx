@@ -58,6 +58,12 @@ export default function App() {
 
   useEffect(() => store.subscribe(() => setVersion((v) => v + 1)), [store]);
 
+  // Keep the home-screen "Right now" widget mirroring the queue (debounced inside).
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    void import('./src/widgets/refresh').then((m) => m.updateTodoWidget()).catch(() => {});
+  }, [version]);
+
   // Deep links (widget tap, `scrible://capture?autostart=1`) jump to Capture and, if
   // requested, start recording immediately. `addEventListener` fires on every tap even
   // for a repeated identical URL — deliberately not `Linking.useURL()`, which dedupes.
@@ -65,7 +71,12 @@ export default function App() {
     const handle = (url: string | null) => {
       if (!url) return;
       const { hostname, path, queryParams } = Linking.parse(url);
-      if (hostname !== 'capture' && path !== 'capture') return;
+      const target = hostname ?? path;
+      if (target === 'queue') {
+        setTab('queue');
+        return;
+      }
+      if (target !== 'capture' && path !== 'capture') return;
       setTab('capture');
       if (queryParams?.autostart === '1') setCaptureRequest((n) => n + 1);
     };

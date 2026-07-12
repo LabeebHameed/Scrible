@@ -46,14 +46,25 @@
           "widgets": [
             {
               "name": "ScribleCapture",
-              "label": "Scrible — Voice Capture",
-              "description": "Tap to capture a thought by voice",
-              "minWidth": "80dp",
-              "minHeight": "80dp",
-              "targetCellWidth": 2,
+              "label": "Scrible — Capture",
+              "description": "Tap and talk — Scrible handles the rest",
+              "minWidth": "250dp",
+              "minHeight": "40dp",
+              "targetCellWidth": 4,
               "targetCellHeight": 1,
-              "resizeMode": "none",
+              "resizeMode": "horizontal",
               "updatePeriodMillis": 0
+            },
+            {
+              "name": "ScribleTodo",
+              "label": "Scrible — Right now",
+              "description": "Your queue on the home screen",
+              "minWidth": "180dp",
+              "minHeight": "180dp",
+              "targetCellWidth": 3,
+              "targetCellHeight": 3,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
             }
           ]
         }
