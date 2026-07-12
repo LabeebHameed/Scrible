@@ -107,8 +107,13 @@ export class OpenAICompatibleProvider {
       JSON.stringify({ transcript: input.text, localHour: input.context.localHour, recentTypes: input.context.recentTypes }),
     );
     const timeIntent = resolveTimeIntent(input.text, out);
+    // Free-form JSON (no schema enforcement): models sometimes answer type
+    // "routineFact" instead of using the routineFact field — normalize, never let an
+    // invalid enum value reach the database.
+    const validTypes = ['task', 'idea', 'reminder'] as const;
+    const type = (validTypes as readonly string[]).includes(out.type) ? out.type : 'task';
     const result: ClassifyOutput = {
-      type: out.type,
+      type,
       confidence: Math.max(0, Math.min(1, out.confidence)),
       title: out.title?.trim() ? out.title.slice(0, 80) : cleanTitle(input.text),
       timeIntent,

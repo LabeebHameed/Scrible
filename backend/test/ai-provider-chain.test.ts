@@ -320,6 +320,49 @@ test('classify: a heuristic-parseable relative time wins over a hallucinated mod
   });
 });
 
+test('classify: an invalid type from the model (e.g. "routineFact") is normalized, routineFact field preserved', async () => {
+  // Live-probe regression: the free-form-JSON provider let the model answer
+  // type:"routineFact" (a field name, not a type) which reached the database and
+  // broke routine auto-remembering. The type must always normalize to the enum.
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'routineFact',
+                confidence: 0.8,
+                title: 'college schedule',
+                timePhrase: null,
+                timeAtIso: null,
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'normal',
+                routineFact: { label: 'college until 4pm on weekdays', days: [1, 2, 3, 4, 5], startHour: 8, endHour: 16 },
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 8 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: "I'm at college until 4pm on weekdays",
+      context: { localHour: 9, recentTypes: [], timezone: 'UTC' },
+    });
+    assert.equal(out.type, 'task', 'invalid model type coerced to a real enum value');
+    assert.equal(out.routineFact?.label, 'college until 4pm on weekdays', 'the fact itself survives');
+  });
+});
+
 test('classify: importance and routineFact default safely when the LLM omits them', async () => {
   await resetTestSchema();
   const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });

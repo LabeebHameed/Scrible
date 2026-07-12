@@ -43,8 +43,14 @@ for (let i = 0; i < corpus.length; i++) {
   const rawText = corpus[i];
   const id = `probe-${Date.now()}-${i}`;
   await req('POST', '/v1/items', { id, rawText, source: 'voice' }, token);
-  await new Promise((r) => setTimeout(r, 4500));
-  const item = await req('GET', `/v1/items/${id}`, undefined, token);
+  // Enrichment is async and can queue up under probe load — poll until it settles
+  // (a 'processing' item isn't a comprehension failure, it's an unfinished one).
+  let item;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    item = await req('GET', `/v1/items/${id}`, undefined, token);
+    if (item.status !== 'captured' && item.status !== 'processing') break;
+  }
   const at = item.timeIntent?.at ?? null;
   rows.push({
     text: rawText.slice(0, 48),
@@ -57,8 +63,15 @@ for (let i = 0; i < corpus.length; i++) {
   });
 
   const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (normalize(item.title) === normalize(rawText) && rawText.split(' ').length > 6) {
+  const settled = item.status !== 'captured' && item.status !== 'processing';
+  if (settled && normalize(item.title) === normalize(rawText) && rawText.split(' ').length > 6) {
     failures.push(`VERBATIM ECHO (old code live?): "${rawText.slice(0, 60)}"`);
+  }
+  if (!settled) {
+    failures.push(`STUCK IN PROCESSING after 24s: "${rawText.slice(0, 60)}"`);
+  }
+  if (item.type && !['task', 'idea', 'reminder'].includes(item.type)) {
+    failures.push(`INVALID TYPE "${item.type}" reached the database: "${rawText.slice(0, 60)}"`);
   }
   if (/in the next minute/i.test(rawText) && at && at - Date.now() > 5 * 60_000) {
     failures.push(`TIME HALLUCINATION: "in the next minute" resolved to ${new Date(at).toISOString()}`);
