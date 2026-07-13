@@ -58,10 +58,12 @@ export async function setupPushNotifications(api: ApiClient, localAlarms = false
     }
     // Explicit Stop/Snooze buttons on reminder notifications, instead of relying on
     // an ambiguous swipe-to-dismiss — matches "alarm" behavior: you choose, it
-    // doesn't just quietly go away.
+    // doesn't just quietly go away. `opensAppToForeground: false` is the fix for
+    // "I have to go into the app to stop it" — without it Android's default is to
+    // launch the app on button press, which isn't "stopping it right there".
     await Notifications.setNotificationCategoryAsync(REMINDER_CATEGORY, [
-      { identifier: 'STOP', buttonTitle: 'Stop' },
-      { identifier: 'SNOOZE', buttonTitle: `Snooze ${SNOOZE_MINUTES}m` },
+      { identifier: 'STOP', buttonTitle: 'Stop', options: { opensAppToForeground: false } },
+      { identifier: 'SNOOZE', buttonTitle: `Snooze ${SNOOZE_MINUTES}m`, options: { opensAppToForeground: false } },
     ]);
 
     const perm = await Notifications.getPermissionsAsync();
@@ -89,6 +91,11 @@ export async function setupPushNotifications(api: ApiClient, localAlarms = false
   const ack = (response: Notifications.NotificationResponse | null) => {
     const reminderId = reminderIdFrom(response);
     if (!reminderId) return;
+    // Stop/Snooze are background actions (opensAppToForeground: false) — the
+    // notification otherwise lingers in the shade with no visible sign the button
+    // did anything, which read as "the buttons don't work".
+    const id = response?.notification.request.identifier;
+    if (id) void Notifications.dismissNotificationAsync(id).catch(() => {});
     if (response?.actionIdentifier === 'SNOOZE') {
       // Re-arms delivery later server-side; must NOT also mark seen, or it would
       // never re-fire (see backend ReminderScheduler.snooze).
