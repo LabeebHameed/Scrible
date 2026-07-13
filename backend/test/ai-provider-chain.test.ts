@@ -320,6 +320,57 @@ test('classify: a heuristic-parseable relative time wins over a hallucinated mod
   });
 });
 
+test('classify: a bare wall-clock time resolves in the USER\'s timezone even when the model writes it as literal UTC', async () => {
+  // Live-probe regression: an 8B model asked to convert "noon in IST" to UTC
+  // reliably just echoes the local digits with a bare "Z" ("...T12:00:00.000Z")
+  // instead of doing the offset arithmetic (which would be "...T06:30:00.000Z").
+  // The deterministic, timezone-aware parser must win over this model mistake.
+  await resetTestSchema();
+  const ctx = await buildApp({ ...baseOverrides, nvidiaApiKey: 'fake-nvidia-key' });
+  const stub = (async () =>
+    ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                type: 'reminder',
+                confidence: 0.9,
+                title: 'Drink water',
+                timePhrase: 'at 12',
+                timeAtIso: '2026-07-13T12:00:00.000Z', // model's mistake: literal UTC, not IST
+                recurrence: null,
+                computerAction: false,
+                appTrigger: null,
+                importance: 'normal',
+                routineFact: null,
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 5 },
+      }),
+    }) as unknown as Response) as typeof fetch;
+
+  await withStubbedFetch(stub, async () => {
+    const out = await ctx.orchestrator.run('classify', {
+      text: 'remind me to drink water at 12',
+      context: { localHour: 9, recentTypes: [], timezone: 'Asia/Kolkata' },
+    });
+    const hour = Number(
+      new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false }).format(
+        new Date(out.timeIntent!.at!),
+      ),
+    );
+    assert.ok(
+      hour === 12 || hour === 0,
+      `expected noon or midnight in Asia/Kolkata, got hour ${hour} (${new Date(out.timeIntent!.at!).toISOString()})`,
+    );
+  });
+});
+
 test('classify: an invalid type from the model (e.g. "routineFact") is normalized, routineFact field preserved', async () => {
   // Live-probe regression: the free-form-JSON provider let the model answer
   // type:"routineFact" (a field name, not a type) which reached the database and

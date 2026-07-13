@@ -39,67 +39,167 @@ export function parseRelativeTime(text: string, now = new Date()): TimeIntent | 
   return null;
 }
 
-/** Extract an explicit time expression ("friday at 3pm", "tomorrow", "in 2 hours").
- * NOTE: wall-clock branches below compute in the SERVER's clock — fine as the no-LLM
- * fallback, but timezone-naive; the LLM (which is told the user's local time) owns
- * wall-clock resolution when available (see resolveTimeIntent). */
-export function parseTimeIntent(text: string, now = new Date()): TimeIntent | null {
+/** The offset (ms) that `timeZone` is at from UTC at the instant `utcMs` — computed by
+ * asking Intl what wall-clock that instant shows there and diffing against the UTC
+ * numbers. Timezone-arithmetic an LLM reliably gets wrong; this never does. */
+function tzOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+    .formatToParts(new Date(utcMs))
+    .reduce<Record<string, string>>((acc, p) => {
+      if (p.type !== 'literal') acc[p.type] = p.value;
+      return acc;
+    }, {});
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return asUtc - utcMs;
+}
+
+/** The true UTC instant for a wall-clock date/time as seen IN `timeZone` — e.g.
+ * (2026, 7, 13, 12, 0, 'Asia/Kolkata') → the instant that reads noon in Kolkata,
+ * not literally 12:00 UTC. One correction pass covers DST-transition edges. */
+function zonedTimeToUtc(y: number, mo: number, d: number, h: number, mi: number, timeZone: string): number {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  const offset = tzOffsetMs(guess, timeZone);
+  const offset2 = tzOffsetMs(guess - offset, timeZone);
+  return guess - offset2;
+}
+
+/** "Now", as calendar fields IN `timeZone` — the day/hour a wall-clock phrase like
+ * "tomorrow" or "at 5" must be anchored to is the user's day, not the server's. */
+function zonedNow(now: Date, timeZone: string): { y: number; mo: number; d: number; dow: number; h: number; mi: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    weekday: 'short',
+  })
+    .formatToParts(now)
+    .reduce<Record<string, string>>((acc, p) => {
+      if (p.type !== 'literal') acc[p.type] = p.value;
+      return acc;
+    }, {});
+  return {
+    y: Number(parts.year),
+    mo: Number(parts.month),
+    d: Number(parts.day),
+    dow: ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(parts.weekday!.toLowerCase()),
+    h: Number(parts.hour),
+    mi: Number(parts.minute),
+  };
+}
+
+/** Resolve an ambiguous bare hour (no am/pm, e.g. "at 5") to a 24h hour: noon/midnight
+ * for 12/0, otherwise whichever of {AM, PM} is the next to occur from `now` on the
+ * given day, or AM the following day once both have already passed. Casual speech
+ * ("Monday at 2", "remind me at 5") almost always means the sooner upcoming one. */
+function resolveAmbiguousHour(
+  h: number,
+  m: number,
+  y: number,
+  mo: number,
+  d: number,
+  nowMs: number,
+  timeZone: string,
+): { h: number; d: number } {
+  if (h === 12 || h === 0) return { h, d };
+  const amUtc = zonedTimeToUtc(y, mo, d, h, m, timeZone);
+  if (amUtc > nowMs) return { h, d };
+  const pmUtc = zonedTimeToUtc(y, mo, d, h + 12, m, timeZone);
+  if (pmUtc > nowMs) return { h: h + 12, d };
+  return { h, d: d + 1 };
+}
+
+/** Extract an explicit time expression ("friday at 3pm", "tomorrow", "in 2 hours"),
+ * resolved in `timeZone` — the user's own clock, never the server's. Mechanically
+ * computable, so (like parseRelativeTime) it must beat the model: an LLM reliably
+ * fumbles the UTC-offset arithmetic (e.g. writing "T12:00:00.000Z" for "noon in
+ * IST" instead of the correct 06:30Z), which is exactly the "6:32 for a ~12:00
+ * request" bug this replaced. */
+export function parseTimeIntent(text: string, now = new Date(), timeZone = 'UTC'): TimeIntent | null {
   const t = text.toLowerCase();
 
   const rel = parseRelativeTime(text, now);
   if (rel) return rel;
 
-  const timeMatch = t.match(/\b(?:at )?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
-  const hourFrom = (): { h: number; m: number } | null => {
+  // Bare "at 12" (no am/pm) only counts with an explicit "at"; an am/pm suffix
+  // counts on its own ("3pm") — otherwise stray numbers ("in 2 minutes") would match.
+  const timeMatch = t.match(/\bat (\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/) ?? t.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
+  const nowMs = now.getTime();
+  const zn = zonedNow(now, timeZone);
+
+  /** Hour/minute for a target day; `bareDefaultsPm` biases an unqualified hour
+   * toward the evening for named-future-day phrasing ("Monday at 2" → 2pm), while
+   * the plain today-anchored case instead picks whichever of AM/PM is soonest. */
+  const hourFrom = (targetY: number, targetMo: number, targetD: number, bareDefaultsPm: boolean): { h: number; m: number; d: number } | null => {
     if (!timeMatch) return null;
     let h = Number(timeMatch[1]);
     const m = Number(timeMatch[2] ?? 0);
     if (timeMatch[3] === 'pm' && h < 12) h += 12;
-    if (timeMatch[3] === 'am' && h === 12) h = 0;
-    return { h, m };
+    else if (timeMatch[3] === 'am' && h === 12) h = 0;
+    else if (!timeMatch[3]) {
+      if (bareDefaultsPm && h !== 12 && h !== 0) h += 12;
+      else {
+        const resolved = resolveAmbiguousHour(h, m, targetY, targetMo, targetD, nowMs, timeZone);
+        return { h: resolved.h, m, d: resolved.d };
+      }
+    }
+    return { h, m, d: targetD };
   };
 
-  const day = WEEKDAYS.findIndex((d) => t.includes(d));
+  const day = WEEKDAYS.findIndex((w) => t.includes(w));
   if (day >= 0) {
-    const target = new Date(now);
-    let delta = (day - now.getDay() + 7) % 7;
+    let delta = (day - zn.dow + 7) % 7;
     if (delta === 0) delta = 7;
-    target.setDate(target.getDate() + delta);
-    const hm = hourFrom() ?? { h: 9, m: 0 };
-    target.setHours(hm.h, hm.m, 0, 0);
-    return { at: target.getTime(), phrase: WEEKDAYS[day] + (timeMatch ? ` ${timeMatch[0]}` : '') };
+    const hm = hourFrom(zn.y, zn.mo, zn.d + delta, true) ?? { h: 9, m: 0, d: zn.d + delta };
+    return {
+      at: zonedTimeToUtc(zn.y, zn.mo, hm.d, hm.h, hm.m, timeZone),
+      phrase: WEEKDAYS[day] + (timeMatch ? ` ${timeMatch[0]}` : ''),
+    };
   }
 
   if (/\btomorrow\b/.test(t)) {
-    const target = new Date(now);
-    target.setDate(target.getDate() + 1);
-    const hm = hourFrom() ?? { h: 9, m: 0 };
-    target.setHours(hm.h, hm.m, 0, 0);
-    return { at: target.getTime(), phrase: 'tomorrow' + (timeMatch ? ` ${timeMatch[0]}` : '') };
+    const hm = hourFrom(zn.y, zn.mo, zn.d + 1, true) ?? { h: 9, m: 0, d: zn.d + 1 };
+    return { at: zonedTimeToUtc(zn.y, zn.mo, hm.d, hm.h, hm.m, timeZone), phrase: 'tomorrow' + (timeMatch ? ` ${timeMatch[0]}` : '') };
   }
 
   if (/\btonight\b/.test(t)) {
-    const target = new Date(now);
-    target.setHours(20, 0, 0, 0);
-    if (target.getTime() < now.getTime()) target.setDate(target.getDate() + 1);
-    return { at: target.getTime(), phrase: 'tonight' };
+    let at = zonedTimeToUtc(zn.y, zn.mo, zn.d, 20, 0, timeZone);
+    if (at < nowMs) at = zonedTimeToUtc(zn.y, zn.mo, zn.d + 1, 20, 0, timeZone);
+    return { at, phrase: 'tonight' };
   }
 
   if (/\bevery (day|morning|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(t)) {
     const m = t.match(/\bevery (day|morning|week|\w+day)\b/)!;
-    const hm = hourFrom() ?? { h: 9, m: 0 };
-    const target = new Date(now);
-    target.setHours(hm.h, hm.m, 0, 0);
-    if (target.getTime() < now.getTime()) target.setDate(target.getDate() + 1);
-    return { at: target.getTime(), phrase: m[0], recurrence: m[1] === 'morning' ? 'day' : m[1] };
+    const hm = hourFrom(zn.y, zn.mo, zn.d, true) ?? { h: 9, m: 0, d: zn.d };
+    let at = zonedTimeToUtc(zn.y, zn.mo, hm.d, hm.h, hm.m, timeZone);
+    if (at < nowMs) at = zonedTimeToUtc(zn.y, zn.mo, hm.d + 1, hm.h, hm.m, timeZone);
+    return { at, phrase: m[0], recurrence: m[1] === 'morning' ? 'day' : m[1] };
   }
 
   if (timeMatch) {
-    const hm = hourFrom()!;
-    const target = new Date(now);
-    target.setHours(hm.h, hm.m, 0, 0);
-    if (target.getTime() < now.getTime()) target.setDate(target.getDate() + 1);
-    return { at: target.getTime(), phrase: timeMatch[0] };
+    const hm = hourFrom(zn.y, zn.mo, zn.d, false)!;
+    let at = zonedTimeToUtc(zn.y, zn.mo, hm.d, hm.h, hm.m, timeZone);
+    if (hm.d === zn.d && at < nowMs) at = zonedTimeToUtc(zn.y, zn.mo, zn.d + 1, hm.h, hm.m, timeZone);
+    return { at, phrase: timeMatch[0] };
   }
   return null;
 }
@@ -107,26 +207,31 @@ export function parseTimeIntent(text: string, now = new Date()): TimeIntent | nu
 /**
  * Merge the model's time resolution with the deterministic parser.
  * Priority: (1) duration-relative parse ("in 3 minutes") — timezone-free, can't
- * hallucinate, always wins; (2) the model's timeAtIso — it reasons in the USER's
- * timezone (the prompt tells it their local clock), which the server-side wall-clock
- * parser cannot do; (3) the full server-clock parser as the no-model fallback.
- * This ordering fixed two real bugs: "in the next minute" hallucinated to a random
- * afternoon (model overrode the parser), and "at 12" firing at 6:32 for an IST user
- * (UTC parser overrode the timezone-aware model).
+ * hallucinate, always wins; (2) the full deterministic wall-clock parser, now
+ * timezone-aware (weekdays, "tomorrow", "tonight", "every ...", bare "at H") — also
+ * mechanically computable, so it beats the model too; (3) the model's timeAtIso, for
+ * fuzzy/routine-anchored phrasing the parser can't handle at all (e.g. "after work").
+ * This ordering fixed three real bugs: "in the next minute" hallucinated to a random
+ * afternoon; the old UTC-only parser firing at 6:32 for a ~12:00 IST request; and —
+ * why (2) now outranks the model — an 8B model asked to convert "noon in IST" to UTC
+ * reliably just writes "T12:00:00.000Z" (local digits + a bare Z), not the correct
+ * 06:30Z. Timezone arithmetic is exactly the kind of thing to never delegate to an
+ * LLM when it's mechanically computable instead.
  */
 export function resolveTimeIntent(
   text: string,
   model: { timePhrase: string | null; timeAtIso: string | null; recurrence: string | null },
+  timezone = 'UTC',
 ): TimeIntent | null {
   const relative = parseRelativeTime(text);
-  let at = relative?.at;
+  const wallClock = parseTimeIntent(text, new Date(), timezone);
+  let at = relative?.at ?? wallClock?.at;
   if (at == null && model.timeAtIso) {
     const parsed = Date.parse(model.timeAtIso);
     if (!Number.isNaN(parsed)) at = parsed;
   }
-  if (at == null) at = parseTimeIntent(text)?.at;
-  const phrase = model.timePhrase ?? relative?.phrase ?? parseTimeIntent(text)?.phrase;
-  const recurrence = model.recurrence ?? parseTimeIntent(text)?.recurrence;
+  const phrase = model.timePhrase ?? relative?.phrase ?? wallClock?.phrase;
+  const recurrence = model.recurrence ?? wallClock?.recurrence;
   if (at == null && !phrase) return null;
   return { ...(at != null ? { at } : {}), ...(phrase ? { phrase } : {}), ...(recurrence ? { recurrence } : {}) };
 }
@@ -175,7 +280,7 @@ export function parseAppTrigger(text: string): string | null {
 
 export function classifyHeuristic(input: ClassifyInput): ClassifyOutput {
   const text = input.text.trim();
-  const timeIntent = parseTimeIntent(text);
+  const timeIntent = parseTimeIntent(text, new Date(), input.context.timezone);
   const appTrigger = parseAppTrigger(text);
   let type: ClassifyOutput['type'] = 'task';
   let confidence = 0.55;

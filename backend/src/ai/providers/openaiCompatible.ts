@@ -106,7 +106,7 @@ export class OpenAICompatibleProvider {
       `${classifyPrompt(input.context.timezone, input.profile?.routines)} Respond as JSON: { type: "task"|"idea"|"reminder", confidence: number 0-1, title: string, timePhrase: string|null, timeAtIso: string|null (ISO 8601), recurrence: string|null, computerAction: boolean, appTrigger: string|null, importance: "major"|"normal", routineFact: {label:string, days?:number[], startHour:number, endHour?:number}|null }.`,
       JSON.stringify({ transcript: input.text, localHour: input.context.localHour, recentTypes: input.context.recentTypes }),
     );
-    const timeIntent = resolveTimeIntent(input.text, out);
+    const timeIntent = resolveTimeIntent(input.text, out, input.context.timezone);
     // Free-form JSON (no schema enforcement): models sometimes answer type
     // "routineFact" instead of using the routineFact field — normalize, never let an
     // invalid enum value reach the database.

@@ -121,7 +121,7 @@ export class AnthropicProvider {
     // Heuristic parser wins whenever it can parse the text at all — it can't
     // hallucinate; the model's timeAtIso only fills in for phrasing the parser can't
     // handle (fuzzy/routine-anchored times like "after work").
-    const timeIntent = resolveTimeIntent(input.text, out);
+    const timeIntent = resolveTimeIntent(input.text, out, input.context.timezone);
     const result: ClassifyOutput = {
       type: out.type,
       confidence: Math.max(0, Math.min(1, out.confidence)),
