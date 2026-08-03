@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        width: 340px;
+        margin: 0;
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #0e0f13;
+        color: #f2f3f7;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 14px;
+        border-bottom: 1px solid #2e3240;
+      }
+      header h1 {
+        font-size: 15px;
+        margin: 0;
+        font-weight: 800;
+      }
+      main {
+        padding: 12px 14px;
+        max-height: 420px;
+        overflow-y: auto;
+      }
+      .item {
+        background: #1a1c23;
+        border: 1px solid #2e3240;
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+      }
+      .item .title {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      button {
+        border: 1px solid #2e3240;
+        background: #242732;
+        color: #f2f3f7;
+        border-radius: 8px;
+        padding: 5px 10px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: #e8b84b;
+        border-color: #e8b84b;
+        color: #141519;
+        font-weight: 700;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        background: #1a1c23;
+        border: 1px solid #2e3240;
+        color: #f2f3f7;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        font-size: 13px;
+      }
+      .dim {
+        color: #9aa0b0;
+        font-size: 12px;
+      }
+      .error {
+        color: #e06c6c;
+        font-size: 12px;
+        margin: 6px 0;
+      }
+      #signout {
+        font-size: 11px;
+        background: none;
+        border: none;
+        color: #9aa0b0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Scrible</h1>
+      <button id="signout" hidden>sign out</button>
+    </header>
+    <main id="main"><p class="dim">Loading…</p></main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

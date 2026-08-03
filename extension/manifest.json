@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Scrible",
+  "version": "0.1.0",
+  "description": "Your computer-action tasks from Scrible, right when you sit down at the browser.",
+  "permissions": ["storage", "idle", "alarms", "notifications"],
+  "host_permissions": ["http://localhost:8787/*", "https://api.scrible.app/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Scrible"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,35 @@
+# Fly.io app config for the Scrible backend. Lives in backend/, alongside the
+# Dockerfile — this directory is a self-contained deploy unit (no cross-workspace
+# dependencies), so both live in the same build context. Deploy from here:
+# `cd backend && fly deploy` (this file is picked up automatically as ./fly.toml).
+#
+# Storage is a hosted Postgres (Neon/Supabase/Fly Postgres/etc.) via DATABASE_URL —
+# set as a secret (`fly secrets set DATABASE_URL=...`), not baked in here. No
+# persistent volume needed on this app at all; the database is external.
+# Adjust `app` (must be globally unique on Fly) and `primary_region` as needed.
+app = "scrible-api"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8787"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/v1/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
