@@ -1,0 +1,9 @@
+node_modules/
+app/node_modules/
+backend/node_modules/
+.expo/
+app/.expo/
+dist/
+*.db
+backend/scribble*.db
+docs/
