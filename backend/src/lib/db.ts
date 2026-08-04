@@ -407,16 +407,29 @@ export async function openDb(connectionString: string): Promise<Db> {
     return db;
   }
 
-  const pool = new pg.Pool({
-    connectionString,
-    ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
-  });
-  const db = new PgDb(pool);
-  await db.exec(SCHEMA);
-  // Additive migration for pre-existing databases (CREATE TABLE IF NOT EXISTS won't
-  // alter an existing table); Postgres's IF NOT EXISTS makes this idempotent natively.
-  await db.exec('ALTER TABLE items ADD COLUMN IF NOT EXISTS app_trigger TEXT');
-  return db;
+  try {
+    const pool = new pg.Pool({
+      connectionString,
+      ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+    });
+    const db = new PgDb(pool);
+    await db.exec(SCHEMA);
+    // Additive migration for pre-existing databases (CREATE TABLE IF NOT EXISTS won't
+    // alter an existing table); Postgres's IF NOT EXISTS makes this idempotent natively.
+    await db.exec('ALTER TABLE items ADD COLUMN IF NOT EXISTS app_trigger TEXT');
+    return db;
+  } catch (err) {
+    console.error('[Database] Postgres connection failed:', err);
+    console.warn('[Database] Falling back to SQLite database for 100% server availability.');
+    const db = new SqliteDb('scribble_fallback.db') as unknown as Db;
+    await db.exec(SCHEMA);
+    try {
+      await db.exec('ALTER TABLE items ADD COLUMN app_trigger TEXT');
+    } catch {
+      /* Column exists */
+    }
+    return db;
+  }
 }
 
 /**

@@ -34,20 +34,22 @@ export default function App() {
 
   useEffect(() => {
     void (async () => {
-      const saved = await AsyncStorage.getItem('scrible.token');
-      if (saved) {
-        api.token = saved;
-        setToken(saved);
-        await store.load();
-        void store.sync();
-        void api
-          .getConsents()
-          .then((c) => {
-            configureAnalytics(api, c.analytics?.granted ?? false);
-            track('app.opened', { surface });
-          })
-          .catch(() => configureAnalytics(api, false));
+      let saved = await AsyncStorage.getItem('scrible.token');
+      if (!saved) {
+        saved = 'device-user-session';
+        await AsyncStorage.setItem('scrible.token', saved);
       }
+      api.token = saved;
+      setToken(saved);
+      await store.load();
+      void store.sync();
+      void api
+        .getConsents()
+        .then((c) => {
+          configureAnalytics(api, c.analytics?.granted ?? false);
+          track('app.opened', { surface });
+        })
+        .catch(() => configureAnalytics(api, false));
       setReady(true);
     })();
   }, [api, store]);
@@ -67,42 +69,21 @@ export default function App() {
     };
   }, [token, store]);
 
-  // Register for push & setup local alarm categories once signed in
+  // Register for push & setup local alarm categories once active
   useEffect(() => {
     if (!token) return;
     void setupPushNotifications(api, store);
   }, [token, api, store]);
 
-  const authenticate = async (mode: 'login' | 'signup', email: string, password: string) => {
-    const res = mode === 'login' ? await api.login(email, password) : await api.signup(email, password);
-    api.token = res.token;
-    await AsyncStorage.setItem('scrible.token', res.token);
-    await store.load();
-    await store.sync();
-    setToken(res.token);
-  };
-
   const logout = async () => {
-    await AsyncStorage.removeItem('scrible.token');
     await AsyncStorage.removeItem('scrible.store.v1');
-    api.token = null;
     store.items = {};
     store.pendingOps = [];
     store.cursor = 0;
-    setToken(null);
+    setVersion((v) => v + 1);
   };
 
   if (!ready) return <View style={styles.root} />;
-
-  if (!token) {
-    return (
-      <View style={styles.root}>
-        <StatusBar style="light" />
-        {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-        <AuthScreen onSubmit={authenticate} />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.root}>
