@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fs from 'node:fs';
+import { enableEnrichment } from './enrichment.js';
 import { openDb, type Db } from './lib/db.js';
 import { encrypt } from './lib/crypto.js';
 import { loadConfig, type Config } from './config.js';
@@ -95,6 +96,8 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
     internalCalendar,
     analytics,
   };
+
+  enableEnrichment(ctx);
 
   // Scheduling path (plan §2.3): after an item is enriched, reminders get triggers
   // and ideas get calendar blocks — async, confirmed in plain language, undoable.
