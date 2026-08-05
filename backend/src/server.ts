@@ -121,6 +121,15 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
     });
   };
 
+  // Raw audio parser for STT routes
+  app.addContentTypeParser(
+    ['audio/m4a', 'audio/webm', 'audio/wav', 'audio/ogg', 'audio/mp3', 'application/octet-stream', 'audio/*'],
+    { parseAs: 'buffer' },
+    (_req, payload, done) => {
+      done(null, payload);
+    }
+  );
+
   // Permissive CORS for the web dashboard / extension surfaces (token auth, no cookies).
   app.addHook('onRequest', async (req, reply) => {
     reply.header('access-control-allow-origin', '*');
