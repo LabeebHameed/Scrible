@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scribble Feature 2 — Voice & Text Capture Web Tester</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0F172A;
+      --surface: #1E293B;
+      --surface-border: #334155;
+      --text: #F8FAFC;
+      --text-dim: #94A3B8;
+      --accent: #6366F1;
+      --accent-hover: #4F46E5;
+      --danger: #EF4444;
+      --success: #10B981;
+      --warning: #F59E0B;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 640px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    header {
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      background: rgba(99, 102, 241, 0.15);
+      color: #818CF8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      letter-spacing: 0.5px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    p.subtitle {
+      font-size: 14px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .server-selector {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .server-selector label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+    }
+
+    select, input[type="text"] {
+      background: #0F172A;
+      border: 1px solid var(--surface-border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus, input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+
+    .capture-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 20px;
+      padding: 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .mic-button {
+      width: 120px;
+      height: 120px;
+      border-radius: 60px;
+      background: linear-gradient(135deg, #6366F1 0%, #4338CA 100%);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+      transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+      position: relative;
+    }
+
+    .mic-button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 12px 30px rgba(99, 102, 241, 0.6);
+    }
+
+    .mic-button.recording {
+      background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+      box-shadow: 0 8px 24px rgba(239, 68, 68, 0.6);
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    .mic-icon {
+      font-size: 38px;
+    }
+
+    .mic-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .live-transcript {
+      width: 100%;
+      min-height: 48px;
+      padding: 12px 16px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px dashed var(--surface-border);
+      border-radius: 12px;
+      text-align: center;
+      font-size: 15px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .live-transcript.placeholder {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .input-group {
+      width: 100%;
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-group input {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: 14px;
+      border-radius: 10px;
+    }
+
+    .btn-submit {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-submit:hover {
+      background: var(--accent-hover);
+    }
+
+    .results-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .item-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .item-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .item-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .tag {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+
+    .tag-task { background: rgba(99, 102, 241, 0.2); color: #818CF8; }
+    .tag-reminder { background: rgba(245, 158, 11, 0.2); color: #FBBF24; }
+    .tag-idea { background: rgba(16, 185, 129, 0.2); color: #34D399; }
+
+    .raw-text {
+      font-size: 13px;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .steps-list {
+      margin-top: 8px;
+      padding-left: 20px;
+      font-size: 13px;
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .status-toast {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      text-align: center;
+      display: none;
+    }
+
+    .status-toast.info { background: rgba(99, 102, 241, 0.2); color: #818CF8; display: block; }
+    .status-toast.success { background: rgba(16, 185, 129, 0.2); color: #34D399; display: block; }
+    .status-toast.error { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; display: block; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="badge">FEATURE 2 TESTER</div>
+    <h1>Voice & Text Capture</h1>
+    <p class="subtitle">Test instant speech recognition, text capture, and AI understanding live in your browser.</p>
+  </header>
+
+  <div class="server-selector">
+    <label for="backendUrl">Backend Endpoint:</label>
+    <select id="backendUrl">
+      <option value="https://scribble-rjma.onrender.com">Production (https://scribble-rjma.onrender.com)</option>
+      <option value="http://localhost:8787">Local (http://localhost:8787)</option>
+    </select>
+  </div>
+
+  <div id="statusToast" class="status-toast"></div>
+
+  <div class="capture-card">
+    <button id="micBtn" class="mic-button">
+      <span class="mic-icon">🎙️</span>
+      <span id="micLabel" class="mic-label">TAP TO SPEAK</span>
+    </button>
+
+    <div id="transcriptBox" class="live-transcript placeholder">
+      Click the mic button to start speaking…
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="typedInput" placeholder="or type your thought here… (e.g. remind me at 5pm to drink water)">
+      <button id="submitBtn" class="btn-submit">Submit</button>
+    </div>
+  </div>
+
+  <div class="results-section">
+    <div class="section-title">Captured Items</div>
+    <div id="itemsContainer">
+      <p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">No captures yet. Try speaking or typing above!</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const backendSelect = document.getElementById('backendUrl');
+  const micBtn = document.getElementById('micBtn');
+  const micLabel = document.getElementById('micLabel');
+  const transcriptBox = document.getElementById('transcriptBox');
+  const typedInput = document.getElementById('typedInput');
+  const submitBtn = document.getElementById('submitBtn');
+  const itemsContainer = document.getElementById('itemsContainer');
+  const statusToast = document.getElementById('statusToast');
+
+  let isRecording = false;
+  let recognition = null;
+  let finalSpeechText = '';
+
+  function showStatus(text, type = 'info') {
+    statusToast.className = `status-toast ${type}`;
+    statusToast.textContent = text;
+  }
+
+  // Setup Web Speech API
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          finalSpeechText += res[0].transcript + ' ';
+        } else {
+          interim += res[0].transcript;
+        }
+      }
+      const full = (finalSpeechText + interim).trim();
+      if (full) {
+        transcriptBox.textContent = full;
+        transcriptBox.classList.remove('placeholder');
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech error:', event.error);
+      showStatus(`Speech recognition note: ${event.error}`, 'error');
+    };
+
+    recognition.onend = () => {
+      if (isRecording) {
+        stopRecording();
+      }
+    };
+  } else {
+    showStatus('Web Speech API not supported in this browser. You can still test text capture!', 'info');
+  }
+
+  function startRecording() {
+    if (!recognition) {
+      showStatus('Speech recognition not available. Please type your capture.', 'error');
+      return;
+    }
+    isRecording = true;
+    finalSpeechText = '';
+    micBtn.classList.add('recording');
+    micLabel.textContent = 'STOP';
+    transcriptBox.textContent = 'Listening… speak now';
+    transcriptBox.classList.add('placeholder');
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function stopRecording() {
+    isRecording = false;
+    micBtn.classList.remove('recording');
+    micLabel.textContent = 'TAP TO SPEAK';
+    if (recognition) {
+      try { recognition.stop(); } catch (e) {}
+    }
+    const captured = transcriptBox.textContent.trim();
+    if (captured && !transcriptBox.classList.contains('placeholder')) {
+      saveCapture(captured, 'voice');
+    }
+  }
+
+  micBtn.addEventListener('click', () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  });
+
+  submitBtn.addEventListener('click', () => {
+    const text = typedInput.value.trim();
+    if (text) {
+      saveCapture(text, 'typed');
+      typedInput.value = '';
+    }
+  });
+
+  typedInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      submitBtn.click();
+    }
+  });
+
+  async function saveCapture(text, source) {
+    showStatus(`Sending capture to ${backendSelect.value}…`, 'info');
+    try {
+      // 1. Capture item via backend API
+      const res = await fetch(`${backendSelect.value}/v1/sync/ops`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer device-user-session'
+        },
+        body: JSON.stringify({
+          ops: [{
+            opId: crypto.randomUUID(),
+            ts: Date.now(),
+            kind: 'item.capture',
+            rawText: text,
+            source: source
+          }]
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
+
+      showStatus(`✅ Captured successfully! Understanding & processing AI title…`, 'success');
+      
+      // Fetch latest state after 1.5s AI enrichment delay
+      setTimeout(fetchItems, 1500);
+
+    } catch (err) {
+      console.error(err);
+      showStatus(`❌ Capture Error: ${err.message}`, 'error');
+    }
+  }
+
+  async function fetchItems() {
+    try {
+      const res = await fetch(`${backendSelect.value}/v1/sync/feed?since=0`, {
+        headers: {
+          'Authorization': 'Bearer device-user-session'
+        }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      renderItems(data.items || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function renderItems(itemsObj) {
+    const items = Object.values(itemsObj).sort((a, b) => b.createdAt - a.createdAt);
+    if (items.length === 0) {
+      itemsContainer.innerHTML = '<p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">No captures yet. Try speaking or typing above!</p>';
+      return;
+    }
+
+    itemsContainer.innerHTML = items.map(item => {
+      const timeStr = item.timeIntent?.at ? new Date(item.timeIntent.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No specific time';
+      const stepsHtml = (item.steps && item.steps.length > 0) 
+        ? `<div class="steps-list">${item.steps.map(s => `<div>• ${s.title}</div>`).join('')}</div>`
+        : '';
+
+      return `
+        <div class="item-card">
+          <div class="item-header">
+            <span class="item-title">${escapeHtml(item.summary || item.title || item.rawText)}</span>
+            <span class="tag tag-${item.type}">${item.type}</span>
+          </div>
+          <div class="raw-text">"${escapeHtml(item.rawText)}"</div>
+          <div class="meta-row">
+            <span>⏰ ${timeStr}</span>
+            <span>⚡ Source: ${item.source}</span>
+          </div>
+          ${stepsHtml}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // Initial fetch
+  fetchItems();
+</script>
+
+</body>
+</html>

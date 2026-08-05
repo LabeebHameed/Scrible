@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import fs from 'node:fs';
 import { openDb, type Db } from './lib/db.js';
 import { encrypt } from './lib/crypto.js';
 import { loadConfig, type Config } from './config.js';
@@ -123,9 +124,17 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
     reply.header('access-control-allow-headers', 'authorization, content-type');
     reply.header('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
   });
-  app.options('/*', async (_req, reply) => reply.code(204).send());
-
   app.get('/v1/health', async () => ({ ok: true, version: '0.1.0' }));
+
+  app.get('/test', async (_req, reply) => {
+    try {
+      const htmlPath = new URL('../../tester.html', import.meta.url);
+      const html = await fs.promises.readFile(htmlPath, 'utf8');
+      reply.type('text/html').send(html);
+    } catch {
+      reply.code(404).send('Tester page not found');
+    }
+  });
 
   registerAuth(app, db, config.jwtSecret);
   registerConsent(app, db);
