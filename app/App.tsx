@@ -14,13 +14,15 @@ import { setupPushNotifications } from './src/push';
 import { syncStoreLocalAlarms } from './src/alarms';
 import { colors } from './src/theme';
 
+import { TesterScreen } from './src/screens/Tester';
+
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL ??
   (Platform.OS === 'android' ? 'http://10.0.2.2:8787' : 'http://localhost:8787');
 
 const SYNC_INTERVAL_MS = 5000;
 
-type Tab = 'capture' | 'queue' | 'activity' | 'settings';
+type Tab = 'capture' | 'queue' | 'activity' | 'settings' | 'tester';
 
 export default function App() {
   const api = useMemo(() => new HttpApi(API_URL), []);
@@ -92,6 +94,7 @@ export default function App() {
         {tab === 'capture' ? <CaptureScreen store={store} api={api} /> : null}
         {tab === 'queue' ? <QueueScreen store={store} version={version} /> : null}
         {tab === 'activity' ? <ActivityScreen store={store} api={api} version={version} /> : null}
+        {tab === 'tester' ? <TesterScreen /> : null}
         {tab === 'settings' ? (
           <SettingsScreen
             api={api}
@@ -109,6 +112,7 @@ export default function App() {
           [
             ['queue', 'Queue'],
             ['capture', 'Capture'],
+            ['tester', 'Tester'],
             ['activity', 'Activity'],
             ['settings', 'Settings'],
           ] as Array<[Tab, string]>
