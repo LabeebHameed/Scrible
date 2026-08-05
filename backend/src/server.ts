@@ -119,10 +119,13 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
   };
 
   // Permissive CORS for the web dashboard / extension surfaces (token auth, no cookies).
-  app.addHook('onSend', async (_req, reply) => {
+  app.addHook('onRequest', async (req, reply) => {
     reply.header('access-control-allow-origin', '*');
-    reply.header('access-control-allow-headers', 'authorization, content-type');
-    reply.header('access-control-allow-methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+    reply.header('access-control-allow-headers', '*');
+    reply.header('access-control-allow-methods', '*');
+    if (req.method === 'OPTIONS') {
+      return reply.code(204).send();
+    }
   });
   app.get('/v1/health', async () => ({ ok: true, version: '0.1.0' }));
 

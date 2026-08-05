@@ -165,8 +165,8 @@
 
     .live-transcript {
       width: 100%;
-      min-height: 48px;
-      padding: 12px 16px;
+      min-height: 54px;
+      padding: 14px 18px;
       background: rgba(15, 23, 42, 0.6);
       border: 1px dashed var(--surface-border);
       border-radius: 12px;
@@ -176,6 +176,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      line-height: 1.4;
     }
 
     .live-transcript.placeholder {
@@ -230,10 +231,10 @@
       background: var(--surface);
       border: 1px solid var(--surface-border);
       border-radius: 14px;
-      padding: 16px;
+      padding: 18px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
       animation: fadeIn 0.3s ease-out;
     }
 
@@ -246,6 +247,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
     }
 
     .item-title {
@@ -260,6 +262,7 @@
       padding: 3px 8px;
       border-radius: 6px;
       text-transform: uppercase;
+      white-space: nowrap;
     }
 
     .tag-task { background: rgba(99, 102, 241, 0.2); color: #818CF8; }
@@ -269,19 +272,21 @@
     .raw-text {
       font-size: 13px;
       color: var(--text-dim);
-      font-style: italic;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 8px 12px;
+      border-radius: 8px;
     }
 
     .meta-row {
       display: flex;
+      flex-wrap: wrap;
       gap: 16px;
       font-size: 12px;
       color: var(--text-dim);
-      margin-top: 4px;
     }
 
     .steps-list {
-      margin-top: 8px;
+      margin-top: 6px;
       padding-left: 20px;
       font-size: 13px;
       color: var(--text);
@@ -291,8 +296,8 @@
     }
 
     .status-toast {
-      padding: 10px 14px;
-      border-radius: 8px;
+      padding: 12px 16px;
+      border-radius: 10px;
       font-size: 13px;
       font-weight: 500;
       text-align: center;
@@ -310,14 +315,14 @@
   <header>
     <div class="badge">FEATURE 2 TESTER</div>
     <h1>Voice & Text Capture</h1>
-    <p class="subtitle">Test instant speech recognition, text capture, and AI understanding live in your browser.</p>
+    <p class="subtitle">Test audio recording, STT transcription, and AI brain understanding directly on your laptop.</p>
   </header>
 
   <div class="server-selector">
     <label for="backendUrl">Backend Endpoint:</label>
     <select id="backendUrl">
       <option value="https://scribble-rjma.onrender.com">Production (https://scribble-rjma.onrender.com)</option>
-      <option value="http://localhost:8787">Local (http://localhost:8787)</option>
+      <option value="http://localhost:8788">Local (http://localhost:8788)</option>
     </select>
   </div>
 
@@ -330,7 +335,7 @@
     </button>
 
     <div id="transcriptBox" class="live-transcript placeholder">
-      Click the mic button to start speaking…
+      Click the mic button to start recording voice audio…
     </div>
 
     <div class="input-group">
@@ -342,7 +347,7 @@
   <div class="results-section">
     <div class="section-title">Captured Items</div>
     <div id="itemsContainer">
-      <p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">No captures yet. Try speaking or typing above!</p>
+      <p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">Loading captured items…</p>
     </div>
   </div>
 </div>
@@ -357,82 +362,51 @@
   const itemsContainer = document.getElementById('itemsContainer');
   const statusToast = document.getElementById('statusToast');
 
+  let mediaRecorder = null;
+  let audioChunks = [];
   let isRecording = false;
-  let recognition = null;
-  let finalSpeechText = '';
 
   function showStatus(text, type = 'info') {
     statusToast.className = `status-toast ${type}`;
     statusToast.textContent = text;
   }
 
-  // Setup Web Speech API
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const res = event.results[i];
-        if (res.isFinal) {
-          finalSpeechText += res[0].transcript + ' ';
-        } else {
-          interim += res[0].transcript;
-        }
-      }
-      const full = (finalSpeechText + interim).trim();
-      if (full) {
-        transcriptBox.textContent = full;
-        transcriptBox.classList.remove('placeholder');
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.error('Speech error:', event.error);
-      showStatus(`Speech recognition note: ${event.error}`, 'error');
-    };
-
-    recognition.onend = () => {
-      if (isRecording) {
-        stopRecording();
-      }
-    };
-  } else {
-    showStatus('Web Speech API not supported in this browser. You can still test text capture!', 'info');
-  }
-
-  function startRecording() {
-    if (!recognition) {
-      showStatus('Speech recognition not available. Please type your capture.', 'error');
-      return;
-    }
-    isRecording = true;
-    finalSpeechText = '';
-    micBtn.classList.add('recording');
-    micLabel.textContent = 'STOP';
-    transcriptBox.textContent = 'Listening… speak now';
-    transcriptBox.classList.add('placeholder');
+  async function startRecording() {
     try {
-      recognition.start();
-    } catch (e) {
-      console.error(e);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/m4a' });
+        showStatus('🎙️ Uploading audio to Whisper STT...', 'info');
+        await transcribeAndSaveAudio(audioBlob);
+      };
+
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.classList.add('recording');
+      micLabel.textContent = 'STOP';
+      transcriptBox.textContent = 'Recording audio… tap STOP when finished';
+      transcriptBox.classList.remove('placeholder');
+      showStatus('Recording audio from microphone...', 'info');
+    } catch (err) {
+      console.error(err);
+      showStatus('Microphone access denied or unsupported.', 'error');
     }
   }
 
   function stopRecording() {
-    isRecording = false;
-    micBtn.classList.remove('recording');
-    micLabel.textContent = 'TAP TO SPEAK';
-    if (recognition) {
-      try { recognition.stop(); } catch (e) {}
-    }
-    const captured = transcriptBox.textContent.trim();
-    if (captured && !transcriptBox.classList.contains('placeholder')) {
-      saveCapture(captured, 'voice');
+    if (mediaRecorder && isRecording) {
+      isRecording = false;
+      micBtn.classList.remove('recording');
+      micLabel.textContent = 'TAP TO SPEAK';
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
     }
   }
 
@@ -443,6 +417,43 @@
       startRecording();
     }
   });
+
+  async function transcribeAndSaveAudio(audioBlob) {
+    try {
+      // 1. Send audio clip to /v1/speech/transcribe for Groq Whisper transcription
+      const res = await fetch(`${backendSelect.value}/v1/speech/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': audioBlob.type || 'audio/m4a',
+          'Authorization': 'Bearer device-user-session'
+        },
+        body: audioBlob
+      });
+
+      let transcript = '';
+      if (res.ok) {
+        const data = await res.json();
+        transcript = data.text || '';
+      }
+
+      if (!transcript) {
+        showStatus('Cloud STT empty or unconfigured. Using fallback text capture.', 'info');
+        transcript = transcriptBox.textContent.replace('Recording audio… tap STOP when finished', '').trim();
+      }
+
+      if (transcript) {
+        transcriptBox.textContent = `"${transcript}"`;
+        await saveCapture(transcript, 'voice');
+      } else {
+        showStatus('No speech detected in audio.', 'error');
+      }
+    } catch (err) {
+      console.error('STT upload error:', err);
+      // Fallback
+      const text = typedInput.value.trim() || transcriptBox.textContent;
+      if (text) await saveCapture(text, 'voice');
+    }
+  }
 
   submitBtn.addEventListener('click', () => {
     const text = typedInput.value.trim();
@@ -461,7 +472,6 @@
   async function saveCapture(text, source) {
     showStatus(`Sending capture to ${backendSelect.value}…`, 'info');
     try {
-      // 1. Capture item via backend API
       const res = await fetch(`${backendSelect.value}/v1/sync/ops`, {
         method: 'POST',
         headers: {
@@ -483,10 +493,15 @@
         throw new Error(`Server returned status ${res.status}`);
       }
 
-      showStatus(`✅ Captured successfully! Understanding & processing AI title…`, 'success');
+      showStatus(`✅ Captured! AI is generating title, tags & schedule…`, 'success');
       
-      // Fetch latest state after 1.5s AI enrichment delay
-      setTimeout(fetchItems, 1500);
+      // Poll feed for 3 seconds to show AI enrichment
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts++;
+        await fetchItems();
+        if (attempts >= 3) clearInterval(interval);
+      }, 1000);
 
     } catch (err) {
       console.error(err);
@@ -501,11 +516,15 @@
           'Authorization': 'Bearer device-user-session'
         }
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        showStatus(`Failed to fetch items from ${backendSelect.value}`, 'error');
+        return;
+      }
       const data = await res.json();
       renderItems(data.items || {});
     } catch (err) {
       console.error(err);
+      showStatus(`Failed to connect to backend: ${err.message}`, 'error');
     }
   }
 
@@ -517,21 +536,23 @@
     }
 
     itemsContainer.innerHTML = items.map(item => {
+      const title = item.summary || item.title || item.rawText;
       const timeStr = item.timeIntent?.at ? new Date(item.timeIntent.at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'No specific time';
       const stepsHtml = (item.steps && item.steps.length > 0) 
-        ? `<div class="steps-list">${item.steps.map(s => `<div>• ${s.title}</div>`).join('')}</div>`
+        ? `<div class="steps-list">${item.steps.map(s => `<div>• ${escapeHtml(s.title)}</div>`).join('')}</div>`
         : '';
 
       return `
         <div class="item-card">
           <div class="item-header">
-            <span class="item-title">${escapeHtml(item.summary || item.title || item.rawText)}</span>
+            <span class="item-title">${escapeHtml(title)}</span>
             <span class="tag tag-${item.type}">${item.type}</span>
           </div>
-          <div class="raw-text">"${escapeHtml(item.rawText)}"</div>
+          <div class="raw-text">Captured raw text: "${escapeHtml(item.rawText)}"</div>
           <div class="meta-row">
             <span>⏰ ${timeStr}</span>
             <span>⚡ Source: ${item.source}</span>
+            <span>📌 Status: ${item.status}</span>
           </div>
           ${stepsHtml}
         </div>

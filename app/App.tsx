@@ -18,7 +18,7 @@ import { TesterScreen } from './src/screens/Tester';
 
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL ??
-  (Platform.OS === 'android' ? 'http://10.0.2.2:8787' : 'http://localhost:8787');
+  (Platform.OS === 'android' ? 'http://10.0.2.2:8788' : 'http://localhost:8788');
 
 const SYNC_INTERVAL_MS = 5000;
 

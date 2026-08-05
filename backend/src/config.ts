@@ -22,7 +22,7 @@ export interface Config {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const jwtSecret = env.JWT_SECRET ?? 'scrible-fallback-jwt-secret-key-32chars!';
   return {
-    port: Number(env.PORT ?? 8787),
+    port: Number(env.PORT ?? 8788),
     databaseUrl: env.DATABASE_URL ?? ':memory:',
     jwtSecret,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
