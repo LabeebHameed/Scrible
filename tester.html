@@ -420,7 +420,7 @@
 
   async function transcribeAndSaveAudio(audioBlob) {
     try {
-      // 1. Send audio clip to /v1/speech/transcribe for Groq Whisper transcription
+      // Send audio clip to /v1/speech/transcribe for STT
       const res = await fetch(`${backendSelect.value}/v1/speech/transcribe`, {
         method: 'POST',
         headers: {
@@ -449,7 +449,6 @@
       }
     } catch (err) {
       console.error('STT upload error:', err);
-      // Fallback
       const text = typedInput.value.trim() || transcriptBox.textContent;
       if (text) await saveCapture(text, 'voice');
     }
@@ -472,6 +471,7 @@
   async function saveCapture(text, source) {
     showStatus(`Sending capture to ${backendSelect.value}…`, 'info');
     try {
+      const entityId = crypto.randomUUID();
       const res = await fetch(`${backendSelect.value}/v1/sync/ops`, {
         method: 'POST',
         headers: {
@@ -481,6 +481,7 @@
         body: JSON.stringify({
           ops: [{
             opId: crypto.randomUUID(),
+            entityId: entityId,
             ts: Date.now(),
             kind: 'item.capture',
             rawText: text,
@@ -490,7 +491,8 @@
       });
 
       if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(`Server returned status ${res.status}: ${errJson.error || 'bad request'}`);
       }
 
       showStatus(`✅ Captured! AI is generating title, tags & schedule…`, 'success');
@@ -511,7 +513,7 @@
 
   async function fetchItems() {
     try {
-      const res = await fetch(`${backendSelect.value}/v1/sync/feed?since=0`, {
+      const res = await fetch(`${backendSelect.value}/v1/sync/changes?since=0`, {
         headers: {
           'Authorization': 'Bearer device-user-session'
         }
@@ -521,15 +523,23 @@
         return;
       }
       const data = await res.json();
-      renderItems(data.items || {});
+      renderChanges(data.changes || []);
     } catch (err) {
       console.error(err);
       showStatus(`Failed to connect to backend: ${err.message}`, 'error');
     }
   }
 
-  function renderItems(itemsObj) {
-    const items = Object.values(itemsObj).sort((a, b) => b.createdAt - a.createdAt);
+  function renderChanges(changes) {
+    // Map items from change rows
+    const itemsMap = {};
+    for (const change of changes) {
+      if (change.item) {
+        itemsMap[change.item.id] = change.item;
+      }
+    }
+
+    const items = Object.values(itemsMap).sort((a, b) => b.createdAt - a.createdAt);
     if (items.length === 0) {
       itemsContainer.innerHTML = '<p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">No captures yet. Try speaking or typing above!</p>';
       return;
