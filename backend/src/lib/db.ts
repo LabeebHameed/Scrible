@@ -411,7 +411,16 @@ export async function openDb(connectionString: string): Promise<Db> {
     const pool = new pg.Pool({
       connectionString,
       ssl: /localhost|127\.0\.0\.1/.test(connectionString) ? false : { rejectUnauthorized: false },
+      connectionTimeoutMillis: 5000,
     });
+    // Prevent unhandled error crashes from pg-pool on invalid host/tenant
+    pool.on('error', (err) => {
+      console.error('[Database] Asynchronous pool error:', err.message);
+    });
+
+    const client = await pool.connect();
+    client.release();
+
     const db = new PgDb(pool);
     await db.exec(SCHEMA);
     // Additive migration for pre-existing databases (CREATE TABLE IF NOT EXISTS won't
