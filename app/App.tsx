@@ -17,8 +17,7 @@ import { colors } from './src/theme';
 import { TesterScreen } from './src/screens/Tester';
 
 const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ??
-  (Platform.OS === 'android' ? 'http://10.0.2.2:8788' : 'http://localhost:8788');
+  process.env.EXPO_PUBLIC_API_URL ?? 'https://scribble-rjma.onrender.com';
 
 const SYNC_INTERVAL_MS = 5000;
 
