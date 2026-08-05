@@ -9,6 +9,7 @@ import { registerItems } from './modules/items.js';
 import { registerSyncRoutes } from './modules/syncRoutes.js';
 import { registerAccount } from './modules/account.js';
 import { registerVoice } from './modules/voice.js';
+import { registerSpeechRoutes } from './modules/speechRoutes.js';
 import { registerCalendarRoutes } from './modules/calendarRoutes.js';
 import { registerExtension } from './modules/extension.js';
 import { registerProfile } from './modules/profile.js';
@@ -133,6 +134,7 @@ export async function buildApp(overrides?: Partial<Config>): Promise<AppContext>
   registerSyncRoutes(app, sync);
   registerAccount(app, db);
   registerVoice(app, db, sync, orchestrator);
+  registerSpeechRoutes(app);
   registerCalendarRoutes(app, db, calendar, reminders);
   registerExtension(app, db, sync);
   registerProfile(app, db, sync, orchestrator);
