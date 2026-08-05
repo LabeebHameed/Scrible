@@ -312,20 +312,20 @@
   <header>
     <div class="badge">FEATURE 2 TESTER</div>
     <h1>Voice & Text Capture</h1>
-    <p class="subtitle">Test audio recording, STT transcription, and AI brain understanding directly on your laptop.</p>
+    <p class="subtitle">Record raw audio clips and send directly to backend Groq STT + AI Brain.</p>
   </header>
 
   <div class="server-selector">
     <div class="row">
       <label for="backendUrl">Backend Endpoint:</label>
       <select id="backendUrl" style="flex:1;">
-        <option value="https://scribble-rjma.onrender.com">Production (https://scribble-rjma.onrender.com)</option>
         <option value="http://localhost:8788">Local (http://localhost:8788)</option>
+        <option value="https://scribble-rjma.onrender.com">Production (https://scribble-rjma.onrender.com)</option>
       </select>
     </div>
     <div class="row">
-      <label for="groqKeyInput">Groq API Key (Optional):</label>
-      <input type="password" id="groqKeyInput" placeholder="gsk_... (leave empty to use backend key or browser dictation)" style="flex:1;">
+      <label for="groqKeyInput">Groq API Key:</label>
+      <input type="password" id="groqKeyInput" placeholder="gsk_... (paste Groq key here)" style="flex:1;">
     </div>
   </div>
 
@@ -338,7 +338,7 @@
     </button>
 
     <div id="transcriptBox" class="live-transcript placeholder">
-      Click the mic button to start recording voice audio…
+      Click the mic button, speak into your microphone, then click STOP.
     </div>
 
     <div class="input-group">
@@ -348,7 +348,7 @@
   </div>
 
   <div class="results-section">
-    <div class="section-title">Captured Items</div>
+    <div class="section-title">Captured Items (Backend AI Brain Output)</div>
     <div id="itemsContainer">
       <p style="font-size: 13px; color: var(--text-dim); text-align: center; padding: 20px;">Loading captured items…</p>
     </div>
@@ -369,33 +369,6 @@
   let mediaRecorder = null;
   let audioChunks = [];
   let isRecording = false;
-  let speechRecognition = null;
-  let recognizedText = '';
-
-  // Setup Web Speech Recognition for live transcript display
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SpeechRecognition) {
-    speechRecognition = new SpeechRecognition();
-    speechRecognition.continuous = true;
-    speechRecognition.interimResults = true;
-    speechRecognition.lang = 'en-US';
-
-    speechRecognition.onresult = (event) => {
-      let currentText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        currentText += event.results[i][0].transcript;
-      }
-      if (currentText.trim()) {
-        recognizedText = currentText.trim();
-        transcriptBox.textContent = `"${recognizedText}"`;
-        transcriptBox.classList.remove('placeholder');
-      }
-    };
-
-    speechRecognition.onerror = (err) => {
-      console.warn('Speech recognition warning:', err.error);
-    };
-  }
 
   function showStatus(text, type = 'info') {
     statusToast.className = `status-toast ${type}`;
@@ -404,37 +377,33 @@
 
   async function startRecording() {
     try {
-      recognizedText = '';
       audioChunks = [];
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4' });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) audioChunks.push(e.data);
       };
 
       mediaRecorder.onstop = async () => {
-        const mimeType = mediaRecorder.mimeType || 'audio/webm';
-        const audioBlob = new Blob(audioChunks, { type: mimeType });
-        showStatus('🎙️ Processing voice recording...', 'info');
-        await processVoiceAudio(audioBlob, mimeType);
+        const finalMime = mediaRecorder.mimeType || mimeType;
+        const audioBlob = new Blob(audioChunks, { type: finalMime });
+        showStatus('🎙️ Sending audio file directly to Backend STT (Groq Whisper v3)...', 'info');
+        await sendAudioToBackendSTT(audioBlob, finalMime);
       };
 
       mediaRecorder.start(250);
-      if (speechRecognition) {
-        try { speechRecognition.start(); } catch {}
-      }
-
       isRecording = true;
       micBtn.classList.add('recording');
       micLabel.textContent = 'STOP';
-      transcriptBox.textContent = 'Listening... Speak into your microphone now!';
+      transcriptBox.textContent = 'Recording microphone audio file… Click STOP when finished!';
       transcriptBox.classList.remove('placeholder');
       showStatus('Recording audio from microphone...', 'info');
     } catch (err) {
       console.error(err);
-      showStatus('Microphone access denied or unsupported.', 'error');
+      showStatus('Microphone access denied or unsupported by browser.', 'error');
     }
   }
 
@@ -443,9 +412,6 @@
       isRecording = false;
       micBtn.classList.remove('recording');
       micLabel.textContent = 'TAP TO SPEAK';
-      if (speechRecognition) {
-        try { speechRecognition.stop(); } catch {}
-      }
       if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
         mediaRecorder.stream.getTracks().forEach(track => track.stop());
@@ -461,9 +427,8 @@
     }
   });
 
-  async function processVoiceAudio(audioBlob, mimeType) {
+  async function sendAudioToBackendSTT(audioBlob, mimeType) {
     try {
-      let groqTranscript = '';
       const groqKey = groqKeyInput.value.trim();
       const headers = {
         'Content-Type': mimeType,
@@ -473,43 +438,40 @@
         headers['x-groq-api-key'] = groqKey;
       }
 
-      // Try sending audio clip to /v1/speech/transcribe
+      showStatus(`Uploading ${audioBlob.size} bytes audio clip to backend ${backendSelect.value}/v1/speech/transcribe ...`, 'info');
+
+      // POST raw audio clip directly to backend speech transcription endpoint
       const res = await fetch(`${backendSelect.value}/v1/speech/transcribe`, {
         method: 'POST',
         headers: headers,
         body: audioBlob
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        groqTranscript = data.text || '';
-        if (groqTranscript) {
-          showStatus('⚡ STT successfully transcribed via Groq Whisper v3!', 'success');
-        }
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server status ${res.status}`);
       }
 
-      const finalSpeechText = groqTranscript || recognizedText;
+      const data = await res.json();
+      const transcribedText = (data.text || '').trim();
 
-      if (finalSpeechText) {
-        transcriptBox.textContent = `"${finalSpeechText}"`;
-        await saveCapture(finalSpeechText, 'voice');
+      if (transcribedText) {
+        transcriptBox.textContent = `"${transcribedText}"`;
+        showStatus(`⚡ Transcribed by Groq Whisper: "${transcribedText}". Sending to AI Brain…`, 'success');
+        await sendCaptureToAIBrain(transcribedText, 'voice');
       } else {
-        showStatus('No speech detected in audio clip.', 'error');
+        showStatus('Backend STT returned empty transcription. Make sure your Groq API key is valid.', 'error');
       }
     } catch (err) {
-      console.error('Audio processing error:', err);
-      if (recognizedText) {
-        await saveCapture(recognizedText, 'voice');
-      } else {
-        showStatus(`Audio upload error: ${err.message}`, 'error');
-      }
+      console.error('STT upload error:', err);
+      showStatus(`❌ Audio STT Error: ${err.message}`, 'error');
     }
   }
 
   submitBtn.addEventListener('click', () => {
     const text = typedInput.value.trim();
     if (text) {
-      saveCapture(text, 'typed');
+      sendCaptureToAIBrain(text, 'typed');
       typedInput.value = '';
     }
   });
@@ -520,8 +482,8 @@
     }
   });
 
-  async function saveCapture(text, source) {
-    showStatus(`Sending capture to ${backendSelect.value}…`, 'info');
+  async function sendCaptureToAIBrain(text, source) {
+    showStatus(`Sending item to AI Brain at ${backendSelect.value}/v1/sync/ops…`, 'info');
     try {
       const entityId = crypto.randomUUID();
       const res = await fetch(`${backendSelect.value}/v1/sync/ops`, {
@@ -549,22 +511,22 @@
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(`Server returned status ${res.status}: ${errJson.error || 'bad request'}`);
+        throw new Error(`Server status ${res.status}: ${errJson.error || 'bad request'}`);
       }
 
-      showStatus(`✅ Captured! AI is generating title, tags & schedule…`, 'success');
+      showStatus(`✅ Captured! AI is generating title, category tags & exact time…`, 'success');
       
-      // Poll feed for 4 seconds to show AI enrichment
+      // Poll feed for 5 seconds to show AI enrichment results
       let attempts = 0;
       const interval = setInterval(async () => {
         attempts++;
         await fetchItems();
-        if (attempts >= 4) clearInterval(interval);
+        if (attempts >= 5) clearInterval(interval);
       }, 1000);
 
     } catch (err) {
       console.error(err);
-      showStatus(`❌ Capture Error: ${err.message}`, 'error');
+      showStatus(`❌ AI Capture Error: ${err.message}`, 'error');
     }
   }
 
@@ -613,7 +575,7 @@
           </div>
           <div class="raw-text">Captured raw text: "${escapeHtml(item.rawText)}"</div>
           <div class="meta-row">
-            <span>⏰ ${timeStr}</span>
+            <span>⏰ Target Time: ${timeStr}</span>
             <span>⚡ Source: ${item.source}</span>
             <span>📌 Status: ${item.status}</span>
           </div>

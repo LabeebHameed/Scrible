@@ -18,8 +18,14 @@ export async function transcribeAudio(
     return null;
   }
 
-  const mime = options.mimeType || 'audio/m4a';
-  const filename = options.filename || 'recording.m4a';
+  const mime = (options.mimeType || 'audio/m4a').toLowerCase();
+  let ext = 'm4a';
+  if (mime.includes('webm')) ext = 'webm';
+  else if (mime.includes('wav')) ext = 'wav';
+  else if (mime.includes('ogg')) ext = 'ogg';
+  else if (mime.includes('mp3') || mime.includes('mpeg')) ext = 'mp3';
+  
+  const filename = options.filename || `recording.${ext}`;
 
   try {
     const formData = new FormData();
