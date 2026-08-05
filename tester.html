@@ -483,9 +483,14 @@
             opId: crypto.randomUUID(),
             entityId: entityId,
             ts: Date.now(),
-            kind: 'item.capture',
-            rawText: text,
-            source: source
+            kind: 'item.create',
+            data: {
+              rawText: text,
+              source: source,
+              title: text,
+              type: 'task',
+              status: 'captured'
+            }
           }]
         })
       });
